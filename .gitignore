@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.cache/
+*.parquet
+bot_state.json
+bot.log
+*.log
+.env
+.venv/
+venv/
