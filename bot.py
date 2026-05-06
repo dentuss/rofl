@@ -3,28 +3,27 @@
 Default mode is PAPER (dry-run). Set MODE=live and provide API keys to trade
 real money — only do this after you've reviewed the code and the risks.
 
-Exchange:  configurable via ccxt (kucoin / bybit / okx / kraken / ...).
-Pair:      ETH/USDT
-TF:        1h
-Strategy:  Donchian breakout (turtle-style) + ADX trend filter
-           + Crypto Fear & Greed sentiment filter:
-             - Skip SHORT entries when F&G < 25 (extreme fear =
-               capitulation zone, oversold bounces are likely)
-Sizing:    1.5% equity at risk, max 3x leverage
-Stops:     2.5x ATR(14)
-TP:        5.0x ATR(14)
-Time stop: 96 bars (4 days on 1h)
-
-Backtest evidence (100 USDT start, 0.06% fee, 2bp slippage, ETH/USDT 1h, 1y):
-  Baseline Donchian:           +98.72%  Sharpe 2.33  MDD -12.2%  win_pct 75%
-  + skip_fear sentiment filter:+93.46%  Sharpe 2.42  MDD -10.8%  win_pct 92%
-The filter trades a small return cost for a much steadier monthly equity
-curve (11/12 months profitable vs 9/12).
-
-Run:
-  python3 bot.py            # paper mode by default
+Single-pair operation (default):
+  python3 bot.py            # paper, ETH/USDT, sentiment filter on
   MODE=live python3 bot.py  # real orders, requires API keys
-  USE_SENTIMENT=0 python3 bot.py  # disable F&G filter
+
+Multi-pair portfolio (recommended for steadier monthly returns):
+  Run two instances with capital split. Each gets its own state file.
+  See run_portfolio.sh for the canonical 70/30 ETH/SOL setup.
+  Backtest: 70/30 portfolio cuts worst-month from -8% to -5% and MDD
+  from -11% to -9% vs single-pair, with the same 83% months-won rate.
+
+Configuration:
+  Strategy params:  STRATEGY_PRESET=steady (default) | maxsharpe | aggressive
+                    See PRESETS table below for what each one enables.
+  Filters:          USE_SENTIMENT=1 (default), USE_HTF=auto-from-preset
+  Risk:             RISK_PER_TRADE=0.015, MAX_LEVERAGE=3
+  Allow shorts:     ALLOW_SHORT=1 (default)
+
+Backtest evidence on 1y of ETH/USDT 1h (100 USDT, 0.06% fee, 2bp slip):
+  aggressive (no filter):        +98.7%, Sharpe 2.32, MDD -12.2%, 75% mo win
+  steady (sentiment, default):   +93.0%, Sharpe 2.41, MDD -10.8%, 83% mo win
+  maxsharpe (sentiment + HTF):   +76.5%, Sharpe 2.68, MDD  -8.4%, 67% mo win
 """
 from __future__ import annotations
 
@@ -42,7 +41,16 @@ import pandas as pd
 
 from sentiment import fetch_fear_greed
 from strategies import donchian_breakout
+from strategies_enhanced import with_htf_trend_filter
 from strategies_sentiment import donchian_skip_fear
+
+
+# Strategy presets. Each row: (use_sentiment, use_htf_filter)
+PRESETS = {
+    "aggressive": (False, False),  # raw Donchian, biggest return, biggest DD
+    "steady":     (True,  False),  # +sentiment, recommended default
+    "maxsharpe":  (True,  True),   # +sentiment +HTF daily filter
+}
 
 
 # ----------------------------- Configuration --------------------------------
@@ -68,9 +76,28 @@ class BotConfig:
     adx_n: int = 14
     adx_min: float = 20.0
     atr_n: int = 14
+    # Strategy preset selects which filters are active
+    preset: str = os.getenv("STRATEGY_PRESET", "steady")
     # Sentiment filter (Crypto Fear & Greed Index)
-    use_sentiment: bool = os.getenv("USE_SENTIMENT", "1") == "1"
     fear_threshold: float = float(os.getenv("FEAR_THRESHOLD", "25"))
+    # HTF trend filter
+    htf_rule: str = os.getenv("HTF_RULE", "1D")
+    htf_ema_n: int = int(os.getenv("HTF_EMA_N", "50"))
+    # Manual overrides (otherwise read from preset)
+    use_sentiment_override: str = os.getenv("USE_SENTIMENT", "")
+    use_htf_override: str = os.getenv("USE_HTF", "")
+
+    @property
+    def use_sentiment(self) -> bool:
+        if self.use_sentiment_override:
+            return self.use_sentiment_override == "1"
+        return PRESETS[self.preset][0]
+
+    @property
+    def use_htf(self) -> bool:
+        if self.use_htf_override:
+            return self.use_htf_override == "1"
+        return PRESETS[self.preset][1]
 
 
 # ----------------------------- State ----------------------------------------
@@ -233,6 +260,10 @@ class Bot:
                 sig = donchian_breakout(df, **donchian_kwargs)
         else:
             sig = donchian_breakout(df, **donchian_kwargs)
+        if self.cfg.use_htf:
+            sig = with_htf_trend_filter(df, sig,
+                                        htf_rule=self.cfg.htf_rule,
+                                        ema_n=self.cfg.htf_ema_n)
         # Use the last fully-closed bar's signal (no look-ahead)
         last = sig.iloc[-1]
         side = int(last["signal"])
@@ -357,7 +388,9 @@ class Bot:
 
     def run(self) -> None:
         self.log.info(f"starting bot mode={self.cfg.mode} symbol={self.cfg.symbol} "
-                      f"tf={self.cfg.timeframe} equity={self.state.equity:.2f}")
+                      f"tf={self.cfg.timeframe} preset={self.cfg.preset} "
+                      f"sentiment={self.cfg.use_sentiment} htf={self.cfg.use_htf} "
+                      f"equity={self.state.equity:.2f}")
         if self.state.position:
             p = self.state.position
             self.log.info(f"resuming with open position: side={p.side} qty={p.qty:.6f} "
