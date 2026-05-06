@@ -1,26 +1,30 @@
-"""Live trading bot for the Donchian-breakout strategy.
+"""Live trading bot for the Donchian-breakout strategy with F&G sentiment filter.
 
 Default mode is PAPER (dry-run). Set MODE=live and provide API keys to trade
 real money — only do this after you've reviewed the code and the risks.
 
-Exchange: configurable via ccxt (kucoin / bybit / okx / kraken / ...).
-Pair:     ETH/USDT
-TF:       1h
-Strategy: Donchian breakout (turtle-style) with ADX trend filter
-Sizing:   1.5% equity at risk, max 3x leverage
-Stops:    2.5x ATR(14)
-TP:       5.0x ATR(14)
+Exchange:  configurable via ccxt (kucoin / bybit / okx / kraken / ...).
+Pair:      ETH/USDT
+TF:        1h
+Strategy:  Donchian breakout (turtle-style) + ADX trend filter
+           + Crypto Fear & Greed sentiment filter:
+             - Skip SHORT entries when F&G < 25 (extreme fear =
+               capitulation zone, oversold bounces are likely)
+Sizing:    1.5% equity at risk, max 3x leverage
+Stops:     2.5x ATR(14)
+TP:        5.0x ATR(14)
 Time stop: 96 bars (4 days on 1h)
 
-Backtest evidence (100 USDT start, 0.06% fee, 2bp slippage, ETH/USDT 1h):
-  365d:  +101.67% (244 trades, 43.9% WR, PF 1.37, MDD 12.2%, Sharpe 2.37)
-  Rolling 30d windows over 1y: 10/12 profitable, median +5.0%/month,
-                               worst -6.5%, best +15.3%
-Robustness: in a 324-config parameter sweep, 303/324 (94%) profitable on 1y.
+Backtest evidence (100 USDT start, 0.06% fee, 2bp slippage, ETH/USDT 1h, 1y):
+  Baseline Donchian:           +98.72%  Sharpe 2.33  MDD -12.2%  win_pct 75%
+  + skip_fear sentiment filter:+93.46%  Sharpe 2.42  MDD -10.8%  win_pct 92%
+The filter trades a small return cost for a much steadier monthly equity
+curve (11/12 months profitable vs 9/12).
 
 Run:
   python3 bot.py            # paper mode by default
   MODE=live python3 bot.py  # real orders, requires API keys
+  USE_SENTIMENT=0 python3 bot.py  # disable F&G filter
 """
 from __future__ import annotations
 
@@ -36,7 +40,9 @@ from typing import Optional
 
 import pandas as pd
 
+from sentiment import fetch_fear_greed
 from strategies import donchian_breakout
+from strategies_sentiment import donchian_skip_fear
 
 
 # ----------------------------- Configuration --------------------------------
@@ -62,6 +68,9 @@ class BotConfig:
     adx_n: int = 14
     adx_min: float = 20.0
     atr_n: int = 14
+    # Sentiment filter (Crypto Fear & Greed Index)
+    use_sentiment: bool = os.getenv("USE_SENTIMENT", "1") == "1"
+    fear_threshold: float = float(os.getenv("FEAR_THRESHOLD", "25"))
 
 
 # ----------------------------- State ----------------------------------------
@@ -204,8 +213,7 @@ class Bot:
 
     # --- signal generation (matches backtest exactly) -----------------------
     def compute_signal(self, df: pd.DataFrame) -> dict:
-        sig = donchian_breakout(
-            df,
+        donchian_kwargs = dict(
             entry_n=self.cfg.entry_n,
             exit_n=self.cfg.exit_n,
             adx_n=self.cfg.adx_n,
@@ -214,6 +222,17 @@ class Bot:
             sl_mult=self.cfg.sl_mult,
             tp_mult=self.cfg.tp_mult,
         )
+        if self.cfg.use_sentiment:
+            try:
+                fng = fetch_fear_greed()
+                sig = donchian_skip_fear(df, fng,
+                                         fear_min=self.cfg.fear_threshold,
+                                         **donchian_kwargs)
+            except Exception as e:
+                self.log.warning(f"sentiment fetch failed, falling back to baseline: {e}")
+                sig = donchian_breakout(df, **donchian_kwargs)
+        else:
+            sig = donchian_breakout(df, **donchian_kwargs)
         # Use the last fully-closed bar's signal (no look-ahead)
         last = sig.iloc[-1]
         side = int(last["signal"])
