@@ -1,20 +1,22 @@
-"""Live trading bot for the chosen triple-confirm long-only strategy.
+"""Live trading bot for the Donchian-breakout strategy.
 
 Default mode is PAPER (dry-run). Set MODE=live and provide API keys to trade
 real money — only do this after you've reviewed the code and the risks.
 
 Exchange: configurable via ccxt (kucoin / bybit / okx / kraken / ...).
 Pair:     ETH/USDT
-TF:       15m
-Strategy: triple-confirm long-only (ema 9/26/50 stack + RSI>55 + ADX>22)
+TF:       1h
+Strategy: Donchian breakout (turtle-style) with ADX trend filter
 Sizing:   1.5% equity at risk, max 3x leverage
-Stops:    1.8x ATR(14)
-TP:       3.0x ATR(14)
-Time stop: 96 bars (24h on 15m)
+Stops:    2.5x ATR(14)
+TP:       5.0x ATR(14)
+Time stop: 96 bars (4 days on 1h)
 
-Backtest evidence (30 days, 100 USDT, 0.06% fee, 2bp slippage):
-  ETH-USDT 15m -> +24.47%, 75 trades, 57.3% win-rate, PF 1.56, MDD 10.8%
-  60-day window: +47.42% (137 trades, 55.5% WR, PF 1.54, MDD 14.5%)
+Backtest evidence (100 USDT start, 0.06% fee, 2bp slippage, ETH/USDT 1h):
+  365d:  +101.67% (244 trades, 43.9% WR, PF 1.37, MDD 12.2%, Sharpe 2.37)
+  Rolling 30d windows over 1y: 10/12 profitable, median +5.0%/month,
+                               worst -6.5%, best +15.3%
+Robustness: in a 324-config parameter sweep, 303/324 (94%) profitable on 1y.
 
 Run:
   python3 bot.py            # paper mode by default
@@ -34,8 +36,7 @@ from typing import Optional
 
 import pandas as pd
 
-from indicators import adx, atr, ema, rsi
-from strategies import triple_confirm_long
+from strategies import donchian_breakout
 
 
 # ----------------------------- Configuration --------------------------------
@@ -43,23 +44,23 @@ from strategies import triple_confirm_long
 class BotConfig:
     exchange: str = os.getenv("EXCHANGE", "kucoin")
     symbol: str = os.getenv("SYMBOL", "ETH/USDT")
-    timeframe: str = os.getenv("TIMEFRAME", "15m")
+    timeframe: str = os.getenv("TIMEFRAME", "1h")
     mode: str = os.getenv("MODE", "paper")  # 'paper' | 'live'
     starting_equity: float = float(os.getenv("STARTING_EQUITY", "100"))
     risk_per_trade: float = float(os.getenv("RISK_PER_TRADE", "0.015"))
     max_leverage: float = float(os.getenv("MAX_LEVERAGE", "3"))
-    sl_mult: float = float(os.getenv("SL_MULT", "1.8"))
-    tp_mult: float = float(os.getenv("TP_MULT", "3.0"))
+    sl_mult: float = float(os.getenv("SL_MULT", "2.5"))
+    tp_mult: float = float(os.getenv("TP_MULT", "5.0"))
     max_bars_in_trade: int = int(os.getenv("MAX_BARS", "96"))
+    allow_short: bool = os.getenv("ALLOW_SHORT", "1") == "1"
     state_file: str = os.getenv("STATE_FILE", "bot_state.json")
     log_file: str = os.getenv("LOG_FILE", "bot.log")
     poll_seconds: int = int(os.getenv("POLL_SECONDS", "30"))
-    # Strategy params (locked from validation)
-    ema_fast: int = 9
-    ema_slow: int = 26
-    ema_trend: int = 50
-    rsi_min: float = 55.0
-    adx_min: float = 22.0
+    # Strategy params (locked from 1y validation, sweep top-Sharpe config)
+    entry_n: int = 20
+    exit_n: int = 10
+    adx_n: int = 14
+    adx_min: float = 20.0
     atr_n: int = 14
 
 
@@ -203,12 +204,11 @@ class Bot:
 
     # --- signal generation (matches backtest exactly) -----------------------
     def compute_signal(self, df: pd.DataFrame) -> dict:
-        sig = triple_confirm_long(
+        sig = donchian_breakout(
             df,
-            ema_fast=self.cfg.ema_fast,
-            ema_slow=self.cfg.ema_slow,
-            ema_trend=self.cfg.ema_trend,
-            rsi_min=self.cfg.rsi_min,
+            entry_n=self.cfg.entry_n,
+            exit_n=self.cfg.exit_n,
+            adx_n=self.cfg.adx_n,
             adx_min=self.cfg.adx_min,
             atr_n=self.cfg.atr_n,
             sl_mult=self.cfg.sl_mult,
@@ -216,8 +216,11 @@ class Bot:
         )
         # Use the last fully-closed bar's signal (no look-ahead)
         last = sig.iloc[-1]
+        side = int(last["signal"])
+        if not self.cfg.allow_short and side < 0:
+            side = 0
         return {
-            "signal": int(last["signal"]),
+            "signal": side,
             "sl": float(last["sl"]) if pd.notna(last["sl"]) else None,
             "tp": float(last["tp"]) if pd.notna(last["tp"]) else None,
             "ts": int(df.index[-1].timestamp()),
@@ -305,7 +308,8 @@ class Bot:
     # --- main loop ----------------------------------------------------------
     def tick(self) -> None:
         df = self.ex.fetch_recent(n=300)
-        if len(df) < self.cfg.ema_trend + 5:
+        warmup = max(self.cfg.entry_n, self.cfg.adx_n, self.cfg.atr_n) + 5
+        if len(df) < warmup:
             self.log.warning(f"not enough bars: {len(df)}")
             return
         # Drop the still-forming current bar (the last row from ccxt usually

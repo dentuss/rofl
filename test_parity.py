@@ -1,10 +1,7 @@
-"""Live↔backtest parity check.
+"""Live↔backtest parity check for the Donchian-breakout strategy.
 
-The live bot must compute the same signal as the backtest for any given bar,
-otherwise the backtest results don't predict live behaviour.
-
-We simulate the bot bar-by-bar over historical data and compare its trade
-log to the backtester's trade log. They should match (give-or-take rounding).
+Walks the live signal generator forward bar-by-bar over historical data and
+compares its signal to the backtest's signal. They must match.
 """
 from __future__ import annotations
 
@@ -12,37 +9,38 @@ import pandas as pd
 
 from backtest import BTConfig, run_backtest
 from data import fetch_ohlcv
-from strategies import triple_confirm_long
+from strategies import donchian_breakout
+
+CHOSEN = dict(entry_n=20, exit_n=10, adx_n=14, adx_min=20.0,
+              atr_n=14, sl_mult=2.5, tp_mult=5.0)
 
 
 def main():
-    pair, tf, days = "ETH-USDT", "15m", 30
+    pair, tf, days = "ETH-USDT", "1h", 90
     df = fetch_ohlcv(pair, tf, days=days)
-    sig = triple_confirm_long(df, ema_fast=9, ema_slow=26, ema_trend=50,
-                              rsi_min=55, adx_min=22)
+    full = donchian_breakout(df, **CHOSEN)
 
-    # Bookkeeping: walk forward, generating the strategy on a growing window
-    # at each step (just like the live bot does).
     parity_diffs = 0
-    full = sig.copy()
-    for i in range(120, len(df)):
+    sl_diffs = 0
+    warmup = 60
+    for i in range(warmup, len(df)):
         window = df.iloc[: i + 1]
-        live_sig = triple_confirm_long(window, ema_fast=9, ema_slow=26, ema_trend=50,
-                                       rsi_min=55, adx_min=22).iloc[-1]
+        live_sig = donchian_breakout(window, **CHOSEN).iloc[-1]
         ref = full.iloc[i]
         if int(live_sig["signal"]) != int(ref["signal"]):
             parity_diffs += 1
-        # Also check sl/tp are within 0.1% if both present
         if pd.notna(live_sig["sl"]) and pd.notna(ref["sl"]):
             if abs(live_sig["sl"] - ref["sl"]) / ref["sl"] > 0.001:
-                parity_diffs += 1
+                sl_diffs += 1
 
-    bt = run_backtest(df, sig, BTConfig(), long_only=True)
+    bt = run_backtest(df, full, BTConfig())
     print(f"Parity check on {pair} {tf} {days}d:")
-    print(f"  bars compared: {len(df) - 120}")
+    print(f"  bars compared: {len(df) - warmup}")
     print(f"  signal mismatches: {parity_diffs}")
+    print(f"  sl mismatches:     {sl_diffs}")
     print(f"  backtest stats: {bt.stats()}")
     assert parity_diffs == 0, "live signal differs from backtest!"
+    assert sl_diffs == 0, "live sl differs from backtest!"
     print("PARITY OK")
 
 
