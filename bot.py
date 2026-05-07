@@ -10,30 +10,37 @@ Strategy: triple_long (long-only)
   - Stops: 1.8x ATR(14)
   - TP:    3.0x ATR(14)
 
-Why this and not Donchian breakout?  The 1-year backtest favored Donchian
-because the recent year was strongly trending. On 5 years of data
-(including 2022 bear market, 2023 chop, FTX collapse, banking crisis),
-Donchian LOSES MONEY on ETH and BTC. triple_long survives every regime:
+Presets (STRATEGY_PRESET env var):
+  steady (default)  ETH/USDT 1h, risk 1.5%
+                    5y: +201%, CAGR ~25%, MDD -29%, monthly median +1.4%
+  conservative      ETH+BTC+SOL 1h portfolio (run via run_portfolio.sh)
+                    5y: +434%, CAGR ~40%, MDD -22%, monthly median ~2-3%
+  growth            SOL/USDT 30m, risk 1.5%
+                    5y: +945%, CAGR ~64%, MDD -52%, monthly median +3.0%
+  high_return       SOL/USDT 30m, risk 2.0%
+                    5y: +1842%, CAGR ~87%, MDD -63%, monthly median +3.9%
+  aggressive        SOL/USDT 30m, risk 2.5%
+                    5y: +3243%, CAGR ~109%, MDD -73%, monthly median +4.6%
+  yolo              SOL/USDT 30m, risk 3.0%
+                    5y: +5296%, CAGR ~131%, MDD -80%, monthly median +5.3%
 
-5-year backtest evidence (1h bars, 100 USDT, 0.06% fee, 2bp slip):
-  ETH 5y:  +201% (Sharpe 0.80, MDD -29%) — 6 of 6 years profitable
-  BTC 5y:  +188% (Sharpe 0.76, MDD -43%) — 1 losing year (2022 -23%)
-  SOL 5y:  +386% (Sharpe 1.15, MDD -32%)
+WARNING: 'aggressive' and 'yolo' have catastrophic drawdowns. The 2022 bear
+year had -43% (r=2%) to -50%+ (r=3%) for SOL 30m. With $50k capital under
+'yolo', expect to see equity drop to $10k before recovering. Only use these
+if you can stomach the variance and the strategy bottoms out.
 
-Multi-pair portfolio (run with ./run_portfolio.sh):
-  ETH+SOL 70/30:        +410% / 5y, MDD -22%, Sharpe 1.10
-  ETH+BTC+SOL 33/33/33: +434% / 5y, MDD -22%, Sharpe 1.13
-
-Crisis behaviour (vs buy & hold ETH):
+Crisis behaviour at 'steady' (vs buy & hold ETH):
   China mining ban (May-Jul 2021):  +1.9% strategy vs -39% B&H
   2022 bear market:                +25.5% strategy vs -68% B&H
   Terra/Luna (May 2022):            no losses
   FTX collapse (Nov 2022):          flat strategy vs -24% B&H
 
 Run:
-  python3 bot.py                  # paper, single-pair ETH (default, recommended)
-  ./run_portfolio.sh              # paper, ETH+BTC+SOL portfolio
-  MODE=live python3 bot.py        # real orders
+  python3 bot.py                       # default = steady (ETH 1h)
+  STRATEGY_PRESET=growth python3 bot.py        # SOL 30m, ~3% monthly
+  STRATEGY_PRESET=high_return python3 bot.py   # SOL 30m higher risk, ~4% monthly
+  ./run_portfolio.sh                   # paper, ETH+BTC+SOL portfolio
+  MODE=live python3 bot.py             # real orders
 """
 from __future__ import annotations
 
@@ -55,14 +62,26 @@ from strategies_enhanced import with_htf_trend_filter
 from strategies_sentiment import donchian_skip_fear
 
 
-# Strategy presets. Each row: (strategy, use_sentiment, use_htf_filter, allow_short)
-# 'steady' is the 5-year-validated default. ETH triple_long was profitable
-# every year of the 2021-2026 window, including the 2022 bear market.
+# Strategy presets. Each row defines:
+#   (strategy, symbol, timeframe, risk_per_trade, max_leverage,
+#    use_sentiment, use_htf_filter, allow_short)
+# Backtest evidence in the docstring at the top of this file.
 PRESETS = {
-    "steady":         ("triple_long", False, False, False),  # default, ETH 5y +201%
-    "btc_filtered":   ("triple_long", False, True,  False),  # HTF filter helps BTC
-    "donchian":       ("donchian",    True,  False, True),   # original 1y winner (5y -)
-    "donchian_htf":   ("donchian",    True,  True,  True),   # donchian + sentiment + HTF
+    # Conservative (steady-default) — ETH 1h, low MDD, modest monthly return
+    "steady":       ("triple_long", "ETH/USDT", "1h",  0.015, 3.0, False, False, False),
+    "btc_filtered": ("triple_long", "BTC/USDT", "1h",  0.015, 3.0, False, True,  False),
+
+    # Higher monthly target — SOL 30m at increasing risk levels
+    # Monthly median: growth ~3%, high_return ~4%, aggressive ~4.6%, yolo ~5.3%
+    # MDD: growth -52%, high_return -63%, aggressive -73%, yolo -80%
+    "growth":       ("triple_long", "SOL/USDT", "30m", 0.015, 5.0, False, False, False),
+    "high_return":  ("triple_long", "SOL/USDT", "30m", 0.020, 5.0, False, False, False),
+    "aggressive":   ("triple_long", "SOL/USDT", "30m", 0.025, 5.0, False, False, False),
+    "yolo":         ("triple_long", "SOL/USDT", "30m", 0.030, 5.0, False, False, False),
+
+    # Original strategies kept for completeness
+    "donchian":     ("donchian",    "ETH/USDT", "1h",  0.015, 3.0, True,  False, True),
+    "donchian_htf": ("donchian",    "ETH/USDT", "1h",  0.015, 3.0, True,  True,  True),
 }
 
 
@@ -70,12 +89,15 @@ PRESETS = {
 @dataclass
 class BotConfig:
     exchange: str = os.getenv("EXCHANGE", "kucoin")
-    symbol: str = os.getenv("SYMBOL", "ETH/USDT")
-    timeframe: str = os.getenv("TIMEFRAME", "1h")
+    # Preset drives symbol/tf/risk/leverage. Override via env vars below.
+    preset: str = os.getenv("STRATEGY_PRESET", "steady")
     mode: str = os.getenv("MODE", "paper")  # 'paper' | 'live'
     starting_equity: float = float(os.getenv("STARTING_EQUITY", "100"))
-    risk_per_trade: float = float(os.getenv("RISK_PER_TRADE", "0.015"))
-    max_leverage: float = float(os.getenv("MAX_LEVERAGE", "3"))
+    # Override env vars (default: empty string -> use preset value)
+    symbol_override: str = os.getenv("SYMBOL", "")
+    timeframe_override: str = os.getenv("TIMEFRAME", "")
+    risk_override: str = os.getenv("RISK_PER_TRADE", "")
+    leverage_override: str = os.getenv("MAX_LEVERAGE", "")
     # Donchian stops
     sl_mult: float = float(os.getenv("SL_MULT", "2.5"))
     tp_mult: float = float(os.getenv("TP_MULT", "5.0"))
@@ -99,8 +121,6 @@ class BotConfig:
     ema_trend: int = 50
     rsi_min: float = 55.0
     tl_adx_min: float = 22.0
-    # Strategy preset selects strategy + filters
-    preset: str = os.getenv("STRATEGY_PRESET", "steady")
     # Sentiment filter (Crypto Fear & Greed Index)
     fear_threshold: float = float(os.getenv("FEAR_THRESHOLD", "25"))
     # HTF trend filter
@@ -112,6 +132,22 @@ class BotConfig:
     use_htf_override: str = os.getenv("USE_HTF", "")
 
     @property
+    def symbol(self) -> str:
+        return self.symbol_override or PRESETS[self.preset][1]
+
+    @property
+    def timeframe(self) -> str:
+        return self.timeframe_override or PRESETS[self.preset][2]
+
+    @property
+    def risk_per_trade(self) -> float:
+        return float(self.risk_override) if self.risk_override else PRESETS[self.preset][3]
+
+    @property
+    def max_leverage(self) -> float:
+        return float(self.leverage_override) if self.leverage_override else PRESETS[self.preset][4]
+
+    @property
     def strategy(self) -> str:
         if self.strategy_override:
             return self.strategy_override
@@ -121,19 +157,19 @@ class BotConfig:
     def use_sentiment(self) -> bool:
         if self.use_sentiment_override:
             return self.use_sentiment_override == "1"
-        return PRESETS[self.preset][1]
+        return PRESETS[self.preset][5]
 
     @property
     def use_htf(self) -> bool:
         if self.use_htf_override:
             return self.use_htf_override == "1"
-        return PRESETS[self.preset][2]
+        return PRESETS[self.preset][6]
 
     @property
     def allow_short(self) -> bool:
         if self.allow_short_override:
             return self.allow_short_override == "1"
-        return PRESETS[self.preset][3]
+        return PRESETS[self.preset][7]
 
 
 # ----------------------------- State ----------------------------------------
