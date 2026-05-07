@@ -1,4 +1,4 @@
-"""Live↔backtest parity check for the sentiment-filtered Donchian strategy.
+"""Live↔backtest parity check for triple_long + HTF filter (new default).
 
 Walks the live signal generator forward bar-by-bar over historical data and
 compares its signal to the backtest's signal. They must match.
@@ -9,27 +9,30 @@ import pandas as pd
 
 from backtest import BTConfig, run_backtest
 from data import fetch_ohlcv
-from sentiment import fetch_fear_greed
-from strategies_sentiment import donchian_skip_fear
+from strategies import triple_confirm_long
+from strategies_enhanced import with_htf_trend_filter
 
-CHOSEN = dict(entry_n=20, exit_n=10, adx_n=14, adx_min=20.0,
-              atr_n=14, sl_mult=2.5, tp_mult=5.0)
-FEAR_THRESHOLD = 25.0
+BASE = dict(ema_fast=9, ema_slow=26, ema_trend=50,
+            rsi_min=55.0, adx_min=22.0,
+            atr_n=14, sl_mult=1.8, tp_mult=3.0)
+
+
+def winner_signal(df):
+    s = triple_confirm_long(df, **BASE)
+    return with_htf_trend_filter(df, s, htf_rule="1D", ema_n=50)
 
 
 def main():
     pair, tf, days = "ETH-USDT", "1h", 90
     df = fetch_ohlcv(pair, tf, days=days)
-    fng = fetch_fear_greed()
-    full = donchian_skip_fear(df, fng, fear_min=FEAR_THRESHOLD, **CHOSEN)
+    full = winner_signal(df)
 
     parity_diffs = 0
     sl_diffs = 0
     warmup = 60
     for i in range(warmup, len(df)):
         window = df.iloc[: i + 1]
-        live_sig = donchian_skip_fear(window, fng, fear_min=FEAR_THRESHOLD,
-                                      **CHOSEN).iloc[-1]
+        live_sig = winner_signal(window).iloc[-1]
         ref = full.iloc[i]
         if int(live_sig["signal"]) != int(ref["signal"]):
             parity_diffs += 1
@@ -37,8 +40,8 @@ def main():
             if abs(live_sig["sl"] - ref["sl"]) / ref["sl"] > 0.001:
                 sl_diffs += 1
 
-    bt = run_backtest(df, full, BTConfig())
-    print(f"Parity check (Donchian + skip_fear) on {pair} {tf} {days}d:")
+    bt = run_backtest(df, full, BTConfig(), long_only=True)
+    print(f"Parity check (triple_long + HTF EMA50) on {pair} {tf} {days}d:")
     print(f"  bars compared: {len(df) - warmup}")
     print(f"  signal mismatches: {parity_diffs}")
     print(f"  sl mismatches:     {sl_diffs}")

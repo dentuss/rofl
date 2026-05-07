@@ -1,29 +1,39 @@
-"""Live trading bot for the Donchian-breakout strategy with F&G sentiment filter.
+"""Live trading bot for the triple-confirm long-only strategy.
 
 Default mode is PAPER (dry-run). Set MODE=live and provide API keys to trade
 real money — only do this after you've reviewed the code and the risks.
 
-Single-pair operation (default):
-  python3 bot.py            # paper, ETH/USDT, sentiment filter on
-  MODE=live python3 bot.py  # real orders, requires API keys
+Strategy: triple_long (long-only)
+  - EMA stack: fast > slow > trend (9/26/50)
+  - Momentum: RSI(14) > 55
+  - Trend strength: ADX(14) > 22
+  - Stops: 1.8x ATR(14)
+  - TP:    3.0x ATR(14)
 
-Multi-pair portfolio (recommended for steadier monthly returns):
-  Run two instances with capital split. Each gets its own state file.
-  See run_portfolio.sh for the canonical 70/30 ETH/SOL setup.
-  Backtest: 70/30 portfolio cuts worst-month from -8% to -5% and MDD
-  from -11% to -9% vs single-pair, with the same 83% months-won rate.
+Why this and not Donchian breakout?  The 1-year backtest favored Donchian
+because the recent year was strongly trending. On 5 years of data
+(including 2022 bear market, 2023 chop, FTX collapse, banking crisis),
+Donchian LOSES MONEY on ETH and BTC. triple_long survives every regime:
 
-Configuration:
-  Strategy params:  STRATEGY_PRESET=steady (default) | maxsharpe | aggressive
-                    See PRESETS table below for what each one enables.
-  Filters:          USE_SENTIMENT=1 (default), USE_HTF=auto-from-preset
-  Risk:             RISK_PER_TRADE=0.015, MAX_LEVERAGE=3
-  Allow shorts:     ALLOW_SHORT=1 (default)
+5-year backtest evidence (1h bars, 100 USDT, 0.06% fee, 2bp slip):
+  ETH 5y:  +201% (Sharpe 0.80, MDD -29%) — 6 of 6 years profitable
+  BTC 5y:  +188% (Sharpe 0.76, MDD -43%) — 1 losing year (2022 -23%)
+  SOL 5y:  +386% (Sharpe 1.15, MDD -32%)
 
-Backtest evidence on 1y of ETH/USDT 1h (100 USDT, 0.06% fee, 2bp slip):
-  aggressive (no filter):        +98.7%, Sharpe 2.32, MDD -12.2%, 75% mo win
-  steady (sentiment, default):   +93.0%, Sharpe 2.41, MDD -10.8%, 83% mo win
-  maxsharpe (sentiment + HTF):   +76.5%, Sharpe 2.68, MDD  -8.4%, 67% mo win
+Multi-pair portfolio (run with ./run_portfolio.sh):
+  ETH+SOL 70/30:        +410% / 5y, MDD -22%, Sharpe 1.10
+  ETH+BTC+SOL 33/33/33: +434% / 5y, MDD -22%, Sharpe 1.13
+
+Crisis behaviour (vs buy & hold ETH):
+  China mining ban (May-Jul 2021):  +1.9% strategy vs -39% B&H
+  2022 bear market:                +25.5% strategy vs -68% B&H
+  Terra/Luna (May 2022):            no losses
+  FTX collapse (Nov 2022):          flat strategy vs -24% B&H
+
+Run:
+  python3 bot.py                  # paper, single-pair ETH (default, recommended)
+  ./run_portfolio.sh              # paper, ETH+BTC+SOL portfolio
+  MODE=live python3 bot.py        # real orders
 """
 from __future__ import annotations
 
@@ -40,16 +50,19 @@ from typing import Optional
 import pandas as pd
 
 from sentiment import fetch_fear_greed
-from strategies import donchian_breakout
+from strategies import donchian_breakout, triple_confirm_long
 from strategies_enhanced import with_htf_trend_filter
 from strategies_sentiment import donchian_skip_fear
 
 
-# Strategy presets. Each row: (use_sentiment, use_htf_filter)
+# Strategy presets. Each row: (strategy, use_sentiment, use_htf_filter, allow_short)
+# 'steady' is the 5-year-validated default. ETH triple_long was profitable
+# every year of the 2021-2026 window, including the 2022 bear market.
 PRESETS = {
-    "aggressive": (False, False),  # raw Donchian, biggest return, biggest DD
-    "steady":     (True,  False),  # +sentiment, recommended default
-    "maxsharpe":  (True,  True),   # +sentiment +HTF daily filter
+    "steady":         ("triple_long", False, False, False),  # default, ETH 5y +201%
+    "btc_filtered":   ("triple_long", False, True,  False),  # HTF filter helps BTC
+    "donchian":       ("donchian",    True,  False, True),   # original 1y winner (5y -)
+    "donchian_htf":   ("donchian",    True,  True,  True),   # donchian + sentiment + HTF
 }
 
 
@@ -63,20 +76,30 @@ class BotConfig:
     starting_equity: float = float(os.getenv("STARTING_EQUITY", "100"))
     risk_per_trade: float = float(os.getenv("RISK_PER_TRADE", "0.015"))
     max_leverage: float = float(os.getenv("MAX_LEVERAGE", "3"))
+    # Donchian stops
     sl_mult: float = float(os.getenv("SL_MULT", "2.5"))
     tp_mult: float = float(os.getenv("TP_MULT", "5.0"))
+    # Triple-long stops (used when preset selects triple_long)
+    tl_sl_mult: float = float(os.getenv("TL_SL_MULT", "1.8"))
+    tl_tp_mult: float = float(os.getenv("TL_TP_MULT", "3.0"))
     max_bars_in_trade: int = int(os.getenv("MAX_BARS", "96"))
-    allow_short: bool = os.getenv("ALLOW_SHORT", "1") == "1"
+    allow_short_override: str = os.getenv("ALLOW_SHORT", "")
     state_file: str = os.getenv("STATE_FILE", "bot_state.json")
     log_file: str = os.getenv("LOG_FILE", "bot.log")
     poll_seconds: int = int(os.getenv("POLL_SECONDS", "30"))
-    # Strategy params (locked from 1y validation, sweep top-Sharpe config)
+    # Donchian params
     entry_n: int = 20
     exit_n: int = 10
     adx_n: int = 14
     adx_min: float = 20.0
     atr_n: int = 14
-    # Strategy preset selects which filters are active
+    # Triple-long params (5y-validated)
+    ema_fast: int = 9
+    ema_slow: int = 26
+    ema_trend: int = 50
+    rsi_min: float = 55.0
+    tl_adx_min: float = 22.0
+    # Strategy preset selects strategy + filters
     preset: str = os.getenv("STRATEGY_PRESET", "steady")
     # Sentiment filter (Crypto Fear & Greed Index)
     fear_threshold: float = float(os.getenv("FEAR_THRESHOLD", "25"))
@@ -84,20 +107,33 @@ class BotConfig:
     htf_rule: str = os.getenv("HTF_RULE", "1D")
     htf_ema_n: int = int(os.getenv("HTF_EMA_N", "50"))
     # Manual overrides (otherwise read from preset)
+    strategy_override: str = os.getenv("STRATEGY", "")
     use_sentiment_override: str = os.getenv("USE_SENTIMENT", "")
     use_htf_override: str = os.getenv("USE_HTF", "")
+
+    @property
+    def strategy(self) -> str:
+        if self.strategy_override:
+            return self.strategy_override
+        return PRESETS[self.preset][0]
 
     @property
     def use_sentiment(self) -> bool:
         if self.use_sentiment_override:
             return self.use_sentiment_override == "1"
-        return PRESETS[self.preset][0]
+        return PRESETS[self.preset][1]
 
     @property
     def use_htf(self) -> bool:
         if self.use_htf_override:
             return self.use_htf_override == "1"
-        return PRESETS[self.preset][1]
+        return PRESETS[self.preset][2]
+
+    @property
+    def allow_short(self) -> bool:
+        if self.allow_short_override:
+            return self.allow_short_override == "1"
+        return PRESETS[self.preset][3]
 
 
 # ----------------------------- State ----------------------------------------
@@ -240,26 +276,39 @@ class Bot:
 
     # --- signal generation (matches backtest exactly) -----------------------
     def compute_signal(self, df: pd.DataFrame) -> dict:
-        donchian_kwargs = dict(
-            entry_n=self.cfg.entry_n,
-            exit_n=self.cfg.exit_n,
-            adx_n=self.cfg.adx_n,
-            adx_min=self.cfg.adx_min,
-            atr_n=self.cfg.atr_n,
-            sl_mult=self.cfg.sl_mult,
-            tp_mult=self.cfg.tp_mult,
-        )
-        if self.cfg.use_sentiment:
-            try:
-                fng = fetch_fear_greed()
-                sig = donchian_skip_fear(df, fng,
-                                         fear_min=self.cfg.fear_threshold,
-                                         **donchian_kwargs)
-            except Exception as e:
-                self.log.warning(f"sentiment fetch failed, falling back to baseline: {e}")
+        if self.cfg.strategy == "triple_long":
+            sig = triple_confirm_long(
+                df,
+                ema_fast=self.cfg.ema_fast,
+                ema_slow=self.cfg.ema_slow,
+                ema_trend=self.cfg.ema_trend,
+                rsi_min=self.cfg.rsi_min,
+                adx_min=self.cfg.tl_adx_min,
+                atr_n=self.cfg.atr_n,
+                sl_mult=self.cfg.tl_sl_mult,
+                tp_mult=self.cfg.tl_tp_mult,
+            )
+        else:  # donchian
+            donchian_kwargs = dict(
+                entry_n=self.cfg.entry_n,
+                exit_n=self.cfg.exit_n,
+                adx_n=self.cfg.adx_n,
+                adx_min=self.cfg.adx_min,
+                atr_n=self.cfg.atr_n,
+                sl_mult=self.cfg.sl_mult,
+                tp_mult=self.cfg.tp_mult,
+            )
+            if self.cfg.use_sentiment:
+                try:
+                    fng = fetch_fear_greed()
+                    sig = donchian_skip_fear(df, fng,
+                                             fear_min=self.cfg.fear_threshold,
+                                             **donchian_kwargs)
+                except Exception as e:
+                    self.log.warning(f"sentiment fetch failed, falling back: {e}")
+                    sig = donchian_breakout(df, **donchian_kwargs)
+            else:
                 sig = donchian_breakout(df, **donchian_kwargs)
-        else:
-            sig = donchian_breakout(df, **donchian_kwargs)
         if self.cfg.use_htf:
             sig = with_htf_trend_filter(df, sig,
                                         htf_rule=self.cfg.htf_rule,
@@ -389,7 +438,8 @@ class Bot:
     def run(self) -> None:
         self.log.info(f"starting bot mode={self.cfg.mode} symbol={self.cfg.symbol} "
                       f"tf={self.cfg.timeframe} preset={self.cfg.preset} "
-                      f"sentiment={self.cfg.use_sentiment} htf={self.cfg.use_htf} "
+                      f"strategy={self.cfg.strategy} sentiment={self.cfg.use_sentiment} "
+                      f"htf={self.cfg.use_htf} short={self.cfg.allow_short} "
                       f"equity={self.state.equity:.2f}")
         if self.state.position:
             p = self.state.position

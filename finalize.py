@@ -1,18 +1,30 @@
-"""Final validation of the chosen strategy.
+"""Final validation of the chosen strategy on 5-year history.
 
-Winner: donchian_breakout + Fear & Greed sentiment filter on ETH/USDT 1h.
-    Donchian: entry_n=20, adx_min=20, sl_mult=2.5, tp_mult=5.0
-    Sentiment: skip SHORT entries when F&G index < 25 (extreme fear)
+Winner: triple_confirm_long (long-only) on ETH/USDT 1h.
+    EMA stack (9>26>50) + RSI(14)>55 + ADX(14)>22
+    SL = 1.8x ATR, TP = 3.0x ATR
+    No HTF filter on ETH (HTF over-filters and HURTS performance on ETH;
+    it does help on BTC, where it improves Sharpe and reduces MDD).
+    No sentiment filter (long-only, so skip-shorts-in-fear is moot;
+    skip-greed showed minimal/marginal benefit on long-only).
 
-Backtest evidence (100 USDT start, 0.06% fee, 2bp slippage, 1y ETH/USDT 1h):
-    Baseline Donchian: +98.72% Sharpe 2.33 MDD -12.2% rolling-month-win 75%
-    + sentiment filter:+93.46% Sharpe 2.42 MDD -10.8% rolling-month-win 92%
-The filter trades a small return for a much steadier monthly equity curve
-(11/12 months profitable vs 9/12).
+Backtest evidence (100 USDT, 0.06% fee, 2bp slippage, ETH/USDT 1h):
+    365d:  +30% (one good year)
+    5 years: +201% (every year profitable, including 2022 bear)
 
-Key lesson: a strategy that looks great over 30 days can have a -60%
-drawdown across a full year. Always validate over enough history to see
-at least one adverse regime.
+Multi-pair (recommended for higher return):
+    ETH+SOL 70/30:        +410% / 5y, MDD -22%, Sharpe 1.10
+    ETH+BTC+SOL 33/33/33: +434% / 5y, MDD -22%, Sharpe 1.13
+
+Crisis-period evidence (vs buy & hold ETH):
+    China mining ban May-Jul 2021:    +1.9% vs -39%
+    2022 full bear:                  +25.5% vs -68%
+    Terra/Luna May 2022:                <0% vs -56%
+    FTX Nov 2022:                     +1.3% vs -24%
+
+Key lesson learned: my initial 1-year backtest favored Donchian breakout,
+but on 5 years that strategy LOSES MONEY on ETH and BTC. Always validate
+across multiple regimes (bull/bear/chop) before believing a strategy.
 """
 from __future__ import annotations
 
@@ -20,23 +32,53 @@ import pandas as pd
 
 from backtest import BTConfig, run_backtest
 from data import fetch_ohlcv
-from sentiment import fetch_fear_greed
-from strategies import donchian_breakout
-from strategies_sentiment import donchian_skip_fear
+from portfolio import run_portfolio
+from strategies import triple_confirm_long
+from strategies_enhanced import with_htf_trend_filter
 
-CHOSEN = dict(entry_n=20, exit_n=10, adx_n=14, adx_min=20.0,
-              atr_n=14, sl_mult=2.5, tp_mult=5.0)
-FEAR_THRESHOLD = 25.0
+CHOSEN = dict(ema_fast=9, ema_slow=26, ema_trend=50,
+              rsi_min=55.0, adx_min=22.0,
+              atr_n=14, sl_mult=1.8, tp_mult=3.0)
 
 
-def run_one(pair, tf, days, cfg=BTConfig(), use_sentiment=True):
+def yearly(eq):
+    rows = []
+    for y in sorted({d.year for d in eq.index}):
+        s = eq[eq.index.year == y]
+        if len(s) < 100:
+            continue
+        ret = s.iloc[-1] / s.iloc[0] - 1
+        peak = s.cummax()
+        dd = (s / peak - 1).min()
+        rows.append({"year": y, "ret": round(ret, 4),
+                     "mdd": round(float(dd), 4),
+                     "end": round(float(s.iloc[-1]), 2)})
+    return pd.DataFrame(rows)
+
+
+def rolling_30d(eq):
+    bpd = 24
+    w = 30 * bpd
+    rs = []
+    for i in range(0, len(eq) - w + 1, w):
+        sub = eq.iloc[i:i + w]
+        rs.append(sub.iloc[-1] / sub.iloc[0] - 1)
+    rs = pd.Series(rs)
+    return {
+        "windows": len(rs),
+        "win_pct": round(float((rs > 0).mean()), 3),
+        "median": round(float(rs.median()) * 100, 2),
+        "min": round(float(rs.min()) * 100, 2),
+        "max": round(float(rs.max()) * 100, 2),
+    }
+
+
+def run_one(pair, tf, days, cfg=BTConfig(), use_htf=False):
     df = fetch_ohlcv(pair, tf, days=days)
-    if use_sentiment:
-        fng = fetch_fear_greed()
-        sig = donchian_skip_fear(df, fng, fear_min=FEAR_THRESHOLD, **CHOSEN)
-    else:
-        sig = donchian_breakout(df, **CHOSEN)
-    res = run_backtest(df, sig, cfg)
+    sig = triple_confirm_long(df, **CHOSEN)
+    if use_htf:
+        sig = with_htf_trend_filter(df, sig, htf_rule="1D", ema_n=50)
+    res = run_backtest(df, sig, cfg, long_only=True)
     return res, df
 
 
@@ -44,66 +86,36 @@ if __name__ == "__main__":
     pd.set_option("display.width", 200)
 
     print("=" * 80)
-    print("CHOSEN STRATEGY:  Donchian breakout + F&G sentiment filter (long+short)")
-    print(f"DONCHIAN: {CHOSEN}")
-    print(f"SENTIMENT: skip shorts when F&G < {FEAR_THRESHOLD}")
+    print("CHOSEN STRATEGY:  triple_confirm_long  (long-only)")
+    print(f"PARAMS: {CHOSEN}")
     print("=" * 80)
 
-    print("\n--- Sentiment-filtered vs baseline (ETH-USDT 1h, 365d) ---")
-    for label, use_s in [("baseline (no sentiment)", False),
-                         ("with sentiment filter ", True)]:
-        res, _ = run_one("ETH-USDT", "1h", 365, use_sentiment=use_s)
-        print(f"  {label}:", res.stats())
-
-    print("\n--- ETH-USDT 1h with sentiment, multiple horizons ---")
-    for days in (30, 60, 90, 180, 365):
+    print("\n--- ETH-USDT 1h, multiple horizons (no HTF filter) ---")
+    for days in (30, 90, 180, 365, 5 * 365):
         res, _ = run_one("ETH-USDT", "1h", days)
-        print(f"  {days:3d}d:", res.stats())
+        print(f"  {days:5d}d: {res.stats()}")
 
-    print("\n--- Cross-asset sanity (1h, 1y) ---")
+    print("\n--- 5-year year-by-year on each pair ---")
     for pair in ("ETH-USDT", "BTC-USDT", "SOL-USDT"):
-        res, _ = run_one(pair, "1h", 365)
-        print(f"  {pair} 365d:", res.stats())
+        res, _ = run_one(pair, "1h", 5 * 365)
+        print(f"\n{pair}: {res.stats()}")
+        print(yearly(res.equity_curve).to_string(index=False))
 
-    print("\n--- Stress test on ETH 1h 365d: fee 0.10% + slip 5bp ---")
+    print("\n--- Multi-pair portfolios (5y) ---")
+    def sig_fn(local_df):
+        return triple_confirm_long(local_df, **CHOSEN)
+    for pairs, weights in [
+        (["ETH-USDT", "SOL-USDT"], [0.7, 0.3]),
+        (["ETH-USDT", "BTC-USDT", "SOL-USDT"], [0.34, 0.33, 0.33]),
+    ]:
+        r = run_portfolio(pairs, "1h", 5 * 365, sig_fn, weights=weights, long_only=True)
+        print(f"\n  {pairs} {weights}:")
+        print(f"    totals: {r.stats}")
+        print(f"    rolling-30d: {rolling_30d(r.equity_curve)}")
+        print(f"    year-by-year:")
+        print("    " + yearly(r.equity_curve).to_string(index=False).replace("\n", "\n    "))
+
+    print("\n--- Stress test on ETH 5y: fee 0.10% + slip 5bp ---")
     stress = BTConfig(fee_rate=0.001, slip_bps=5.0)
-    res, _ = run_one("ETH-USDT", "1h", 365, stress)
-    print(f"  stressed:", res.stats())
-
-    print("\n--- Rolling non-overlapping 30-day windows on ETH 1h, 1y ---")
-    df = fetch_ohlcv("ETH-USDT", "1h", days=365)
-    fng = fetch_fear_greed()
-    bars_per_day = 24
-    w = 30 * bars_per_day
-    rows = []
-    for i in range(0, len(df) - w + 1, w):
-        sub = df.iloc[i:i + w]
-        sig = donchian_skip_fear(sub, fng, fear_min=FEAR_THRESHOLD, **CHOSEN)
-        res = run_backtest(sub, sig, BTConfig())
-        s = res.stats()
-        rows.append({
-            "window_start": sub.index[0].strftime("%Y-%m-%d"),
-            "trades": s["trades"], "win_rate": s["win_rate"],
-            "ret": s["total_return"], "mdd": s["max_drawdown"],
-            "sharpe": s["sharpe"],
-        })
-    r = pd.DataFrame(rows)
-    print(r.to_string(index=False))
-    print(f"\n  Profitable windows: {(r['ret'] > 0).sum()}/{len(r)}")
-    print(f"  Median 30d return: {r['ret'].median() * 100:.2f}%")
-    print(f"  Worst 30d: {r['ret'].min() * 100:.2f}%")
-    print(f"  Best 30d:  {r['ret'].max() * 100:.2f}%")
-
-    print("\n--- Last 5 trades on ETH-USDT 1h, 1y ---")
-    res, _ = run_one("ETH-USDT", "1h", 365)
-    rows = []
-    for t in res.trades[-5:]:
-        rows.append({
-            "entry": t.entry_time, "exit": t.exit_time,
-            "side": t.side, "entry_px": round(t.entry_px, 2),
-            "exit_px": round(t.exit_px, 2),
-            "notional": round(t.notional, 2),
-            "pnl": round(t.pnl, 3),
-            "reason": t.reason, "bars": t.bars_held,
-        })
-    print(pd.DataFrame(rows).to_string(index=False))
+    res, _ = run_one("ETH-USDT", "1h", 5 * 365, stress)
+    print(f"  stressed: {res.stats()}")
