@@ -13,9 +13,16 @@
 # Stop with `pkill -f bot.py` or by Ctrl+C in the launcher.
 #
 # Higher-monthly variants:
-#   PRESET_SOL=high_return ./run_portfolio.sh   # SOL r=2.0% (~+4%/mo target)
-#   PRESET_SOL=aggressive  ./run_portfolio.sh   # SOL r=2.5% (~+4.6%/mo, MDD -73%)
-#   PRESET_SOL=yolo        ./run_portfolio.sh   # SOL r=3.0% (~+5.3%/mo, MDD -80%)
+#   PRESET_SOL=high_return       ./run_portfolio.sh  # SOL r=2.0% (~+4%/mo, MDD -63%)
+#   PRESET_SOL=aggressive        ./run_portfolio.sh  # SOL r=2.5% (~+4.6%/mo, MDD -73%)
+#   PRESET_SOL=yolo              ./run_portfolio.sh  # SOL r=3.0% (~+5.3%/mo, MDD -80%)
+#
+# SAFER variants (equity-decay risk scaling auto-enabled):
+#   PRESET_SOL=safer_growth      ./run_portfolio.sh  # SOL r=1.5%+decay (Sharpe +59%)
+#   PRESET_SOL=safer_high_return ./run_portfolio.sh  # SOL r=2.0%+decay (CAGR +84% MDD -47%)
+#
+# Status:
+#   python3 bot_status.py        # prints equity/PnL/position for all bots
 
 set -euo pipefail
 cd "$(dirname "$0")"

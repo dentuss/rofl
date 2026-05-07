@@ -66,6 +66,8 @@ from strategies_sentiment import donchian_skip_fear
 #   (strategy, symbol, timeframe, risk_per_trade, max_leverage,
 #    use_sentiment, use_htf_filter, allow_short)
 # Backtest evidence in the docstring at the top of this file.
+# `safer_*` presets enable equity-curve risk decay (0.5x risk after -20% DD)
+# for ~25% better Sharpe and ~30% lower MDD at modest return cost.
 PRESETS = {
     # Conservative (steady-default) — ETH 1h, low MDD, modest monthly return
     "steady":       ("triple_long", "ETH/USDT", "1h",  0.015, 3.0, False, False, False),
@@ -79,10 +81,23 @@ PRESETS = {
     "aggressive":   ("triple_long", "SOL/USDT", "30m", 0.025, 5.0, False, False, False),
     "yolo":         ("triple_long", "SOL/USDT", "30m", 0.030, 5.0, False, False, False),
 
+    # Safer variants with equity-curve risk decay enabled
+    # (set EQ_RISK_DECAY=0.5 + DD_FOR_DECAY=0.20 explicitly via env)
+    # Backtest 5y: r=2% safer => CAGR +84% / MDD -47% (vs no-decay -63%)
+    "safer_growth":      ("triple_long", "SOL/USDT", "30m", 0.015, 5.0, False, False, False),
+    "safer_high_return": ("triple_long", "SOL/USDT", "30m", 0.020, 5.0, False, False, False),
+
+    # AVAX 30m — SOL's distant cousin, alternative growth pair
+    # Backtest 5y: CAGR +41% / MDD -52% / monthly median +1.3%
+    "avax_growth":  ("triple_long", "AVAX/USDT", "30m", 0.015, 5.0, False, False, False),
+
     # Original strategies kept for completeness
     "donchian":     ("donchian",    "ETH/USDT", "1h",  0.015, 3.0, True,  False, True),
     "donchian_htf": ("donchian",    "ETH/USDT", "1h",  0.015, 3.0, True,  True,  True),
 }
+
+# Presets that auto-enable equity-curve decay
+SAFER_PRESETS = {"safer_growth", "safer_high_return"}
 
 
 # ----------------------------- Configuration --------------------------------
@@ -126,6 +141,12 @@ class BotConfig:
     # HTF trend filter
     htf_rule: str = os.getenv("HTF_RULE", "1D")
     htf_ema_n: int = int(os.getenv("HTF_EMA_N", "50"))
+    # Equity-curve risk decay (5y-tested: cuts MDD significantly with modest cost)
+    # Auto-enabled by `safer_*` presets; can be forced via env.
+    eq_risk_decay_override: str = os.getenv("EQ_RISK_DECAY", "")
+    drawdown_for_decay: float = float(os.getenv("DD_FOR_DECAY", "0.20"))
+    # Daily loss limit / circuit breaker
+    daily_loss_pct: float = float(os.getenv("DAILY_LOSS_PCT", "0.0"))    # 0 disables
     # Manual overrides (otherwise read from preset)
     strategy_override: str = os.getenv("STRATEGY", "")
     use_sentiment_override: str = os.getenv("USE_SENTIMENT", "")
@@ -146,6 +167,15 @@ class BotConfig:
     @property
     def max_leverage(self) -> float:
         return float(self.leverage_override) if self.leverage_override else PRESETS[self.preset][4]
+
+    @property
+    def eq_risk_decay(self) -> float:
+        if self.eq_risk_decay_override:
+            return float(self.eq_risk_decay_override)
+        # Auto-enable for safer_* presets
+        if self.preset in SAFER_PRESETS:
+            return 0.5
+        return 0.0
 
     @property
     def strategy(self) -> str:
@@ -193,6 +223,9 @@ class State:
     position: Optional[Position] = None
     realised_trades: int = 0
     realised_pnl: float = 0.0
+    equity_peak: float = 0.0     # high-water mark for equity-decay risk scaling
+    day_start_ts: int = 0        # midnight UTC of current trading day
+    day_start_equity: float = 0.0
 
     def to_json(self) -> str:
         d = asdict(self)
@@ -202,7 +235,8 @@ class State:
     def load(cls, path: str, starting_equity: float) -> "State":
         p = Path(path)
         if not p.exists():
-            return cls(equity=starting_equity)
+            return cls(equity=starting_equity, equity_peak=starting_equity,
+                       day_start_equity=starting_equity)
         d = json.loads(p.read_text())
         pos = d.get("position")
         return cls(
@@ -211,6 +245,9 @@ class State:
             position=Position(**pos) if pos else None,
             realised_trades=d.get("realised_trades", 0),
             realised_pnl=d.get("realised_pnl", 0.0),
+            equity_peak=d.get("equity_peak", d["equity"]),
+            day_start_ts=d.get("day_start_ts", 0),
+            day_start_equity=d.get("day_start_equity", d["equity"]),
         )
 
     def save(self, path: str) -> None:
@@ -383,6 +420,38 @@ class Bot:
             return "time"
         return None
 
+    def _effective_risk(self) -> float:
+        """Risk-per-trade with equity-curve decay applied."""
+        risk = self.cfg.risk_per_trade
+        if self.cfg.eq_risk_decay > 0:
+            self.state.equity_peak = max(self.state.equity_peak, self.state.equity)
+            if self.state.equity_peak > 0:
+                cur_dd = (self.state.equity / self.state.equity_peak) - 1
+                if cur_dd <= -self.cfg.drawdown_for_decay:
+                    risk *= self.cfg.eq_risk_decay
+                    self.log.info(f"equity-decay active: dd={cur_dd*100:.1f}% "
+                                  f"-> risk reduced to {risk*100:.2f}%")
+        return risk
+
+    def _daily_loss_blocked(self) -> bool:
+        """True if today's loss has hit the circuit-breaker."""
+        if self.cfg.daily_loss_pct <= 0:
+            return False
+        # Roll the day at UTC midnight
+        cur_day = int(time.time() // 86400) * 86400
+        if cur_day > self.state.day_start_ts:
+            self.state.day_start_ts = cur_day
+            self.state.day_start_equity = self.state.equity
+            return False
+        if self.state.day_start_equity <= 0:
+            return False
+        day_pnl_pct = (self.state.equity - self.state.day_start_equity) / self.state.day_start_equity
+        if day_pnl_pct <= -self.cfg.daily_loss_pct:
+            self.log.warning(f"daily loss limit hit: {day_pnl_pct*100:.2f}% "
+                             f"<= -{self.cfg.daily_loss_pct*100:.1f}% — no new entries")
+            return True
+        return False
+
     def enter_position(self, signal_info: dict) -> None:
         side = signal_info["signal"]
         sl = signal_info["sl"]
@@ -390,11 +459,14 @@ class Bot:
         entry_px = self.ex.fetch_price()
         if sl is None or tp is None or side == 0:
             return
+        if self._daily_loss_blocked():
+            return
         stop_dist = abs(entry_px - sl) / entry_px
         if stop_dist < 1e-5:
             self.log.warning("stop too tight, skipping")
             return
-        risk_dollars = self.state.equity * self.cfg.risk_per_trade
+        risk = self._effective_risk()
+        risk_dollars = self.state.equity * risk
         notional = min(risk_dollars / stop_dist, self.state.equity * self.cfg.max_leverage)
         qty = notional / entry_px
         if qty <= 0 or notional < 5:  # min order size sanity
