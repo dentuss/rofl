@@ -16,7 +16,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from strategies import donchian_breakout
+from core.strategies import donchian_breakout
 
 
 def _align_fng(df: pd.DataFrame, fng_daily: pd.DataFrame) -> pd.Series:

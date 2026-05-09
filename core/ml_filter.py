@@ -25,9 +25,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from indicators import adx, atr, ema, rsi, sma, bollinger
-from strategies import triple_confirm_long
-from strategies_sentiment import _align_fng
+from core.indicators import adx, atr, ema, rsi, sma, bollinger
+from core.strategies import triple_confirm_long
+from core.strategies_sentiment import _align_fng
 
 
 def build_features(df: pd.DataFrame, fng: pd.DataFrame | None = None) -> pd.DataFrame:

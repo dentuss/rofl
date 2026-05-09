@@ -56,10 +56,10 @@ from typing import Optional
 
 import pandas as pd
 
-from sentiment import fetch_fear_greed
-from strategies import donchian_breakout, triple_confirm_long
-from strategies_enhanced import with_htf_trend_filter
-from strategies_sentiment import donchian_skip_fear
+from core.sentiment import fetch_fear_greed
+from core.strategies import donchian_breakout, triple_confirm_long
+from core.strategies_enhanced import with_htf_trend_filter
+from core.strategies_sentiment import donchian_skip_fear
 
 
 # Strategy presets. Each row defines:
@@ -320,7 +320,7 @@ class Exchange:
             df = df.set_index("dt")[["open", "high", "low", "close", "volume"]]
             return df
         # Paper mode without ccxt: pull through our KuCoin data layer
-        from data import fetch_ohlcv
+        from core.data import fetch_ohlcv
         sym = self.cfg.symbol.replace("/", "-")
         return fetch_ohlcv(sym, self.cfg.timeframe, days=10, use_cache=False).tail(n)
 

@@ -5,15 +5,19 @@ Killed: trailing stop, vol filter, ADX>=30.
 """
 from __future__ import annotations
 
+import sys as _sys, os as _os
+_THIS_DIR_PARENT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _THIS_DIR_PARENT not in _sys.path: _sys.path.insert(0, _THIS_DIR_PARENT)
+
 import pandas as pd
 
-from backtest import BTConfig, run_backtest
-from data import fetch_ohlcv
-from portfolio import run_portfolio
-from sentiment import fetch_fear_greed
-from strategies import donchian_breakout
-from strategies_enhanced import with_htf_trend_filter
-from strategies_sentiment import donchian_skip_fear
+from core.backtest import BTConfig, run_backtest
+from core.data import fetch_ohlcv
+from core.portfolio import run_portfolio
+from core.sentiment import fetch_fear_greed
+from core.strategies import donchian_breakout
+from core.strategies_enhanced import with_htf_trend_filter
+from core.strategies_sentiment import donchian_skip_fear
 
 PARAMS = dict(entry_n=20, exit_n=10, adx_n=14, adx_min=20.0,
               atr_n=14, sl_mult=2.5, tp_mult=5.0)

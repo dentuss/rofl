@@ -9,13 +9,17 @@ absolute return too much. Win condition:
 """
 from __future__ import annotations
 
+import sys as _sys, os as _os
+_THIS_DIR_PARENT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _THIS_DIR_PARENT not in _sys.path: _sys.path.insert(0, _THIS_DIR_PARENT)
+
 import pandas as pd
 
-from backtest import BTConfig, run_backtest
-from data import fetch_ohlcv
-from sentiment import fetch_fear_greed
-from strategies import donchian_breakout
-from strategies_sentiment import (
+from core.backtest import BTConfig, run_backtest
+from core.data import fetch_ohlcv
+from core.sentiment import fetch_fear_greed
+from core.strategies import donchian_breakout
+from core.strategies_sentiment import (
     donchian_both_filters,
     donchian_long_only_fear,
     donchian_reverse_bias,

@@ -9,9 +9,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from indicators import atr, ema, sma
-from strategies import donchian_breakout
-from strategies_sentiment import donchian_skip_fear
+from core.indicators import atr, ema, sma
+from core.strategies import donchian_breakout
+from core.strategies_sentiment import donchian_skip_fear
 
 
 # --- Higher-timeframe trend filter ------------------------------------------

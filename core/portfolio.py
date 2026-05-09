@@ -13,8 +13,8 @@ from typing import Callable
 
 import pandas as pd
 
-from backtest import BTConfig, run_backtest
-from data import fetch_ohlcv
+from core.backtest import BTConfig, run_backtest
+from core.data import fetch_ohlcv
 
 
 @dataclass

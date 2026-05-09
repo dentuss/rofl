@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from backtest import BTConfig, Trade
+from core.backtest import BTConfig, Trade
 
 
 @dataclass

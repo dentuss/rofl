@@ -5,13 +5,17 @@ that rewards profit, profit factor, and trade count, and penalises drawdown.
 """
 from __future__ import annotations
 
+import sys as _sys, os as _os
+_THIS_DIR_PARENT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _THIS_DIR_PARENT not in _sys.path: _sys.path.insert(0, _THIS_DIR_PARENT)
+
 from itertools import product
 
 import pandas as pd
 
-from backtest import BTConfig, run_backtest
-from data import fetch_ohlcv
-from strategies import REGISTRY
+from core.backtest import BTConfig, run_backtest
+from core.data import fetch_ohlcv
+from core.strategies import REGISTRY
 
 PAIRS = ["BTC-USDT", "ETH-USDT", "SOL-USDT"]
 TIMEFRAMES = ["15m", "1h"]

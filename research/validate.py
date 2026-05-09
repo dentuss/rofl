@@ -7,13 +7,17 @@ For each promising strategy/pair/tf, we:
 """
 from __future__ import annotations
 
+import sys as _sys, os as _os
+_THIS_DIR_PARENT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _THIS_DIR_PARENT not in _sys.path: _sys.path.insert(0, _THIS_DIR_PARENT)
+
 import itertools
 
 import pandas as pd
 
-from backtest import BTConfig, run_backtest
-from data import fetch_ohlcv
-from strategies import (
+from core.backtest import BTConfig, run_backtest
+from core.data import fetch_ohlcv
+from core.strategies import (
     REGISTRY,
     bb_meanrev,
     triple_confirm_long,

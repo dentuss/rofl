@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from indicators import atr
+from core.indicators import atr
 
 
 def vol_targeting_mult(df: pd.DataFrame, target_atr_pct: float = 0.012,
