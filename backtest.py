@@ -52,8 +52,17 @@ class BTResult:
 
     def stats(self) -> dict:
         n = len(self.trades)
+        eq = self.equity_curve
+        ret = float(eq.iloc[-1] / eq.iloc[0] - 1)
+        peak = eq.cummax()
+        dd = float((eq / peak - 1).min())
         if n == 0:
-            return {"trades": 0, "final_equity": float(self.equity_curve.iloc[-1])}
+            return {
+                "trades": 0, "win_rate": 0.0, "avg_win": 0.0, "avg_loss": 0.0,
+                "profit_factor": 0.0, "total_return": ret,
+                "final_equity": round(float(eq.iloc[-1]), 2),
+                "max_drawdown": round(dd, 4), "sharpe": 0.0,
+            }
         pnls = np.array([t.pnl for t in self.trades])
         wins = pnls[pnls > 0]
         losses = pnls[pnls <= 0]
@@ -63,10 +72,6 @@ class BTResult:
         gross_w = wins.sum()
         gross_l = -losses.sum()
         pf = (gross_w / gross_l) if gross_l > 0 else float("inf")
-        eq = self.equity_curve
-        ret = eq.iloc[-1] / eq.iloc[0] - 1
-        peak = eq.cummax()
-        dd = (eq / peak - 1).min()
         # Sharpe on per-bar returns, annualized for 1h bars
         bar_ret = eq.pct_change().fillna(0)
         bars_per_year = 24 * 365

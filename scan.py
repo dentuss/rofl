@@ -15,6 +15,7 @@ from strategies import REGISTRY
 
 PAIRS = ["BTC-USDT", "ETH-USDT", "SOL-USDT"]
 TIMEFRAMES = ["15m", "1h"]
+DEFAULT_DAYS = 365  # use full year - 30d is too short to detect regime risk
 
 
 def score(s: dict) -> float:
@@ -31,7 +32,7 @@ def score(s: dict) -> float:
     return ret * 100 - dd * 60 + pf * 5 + min(s["trades"], 40) * 0.1
 
 
-def scan(days: int = 30) -> pd.DataFrame:
+def scan(days: int = DEFAULT_DAYS) -> pd.DataFrame:
     rows = []
     for pair, tf in product(PAIRS, TIMEFRAMES):
         df = fetch_ohlcv(pair, tf, days=days)
@@ -48,9 +49,12 @@ def scan(days: int = 30) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
+    import sys
     pd.set_option("display.width", 200)
     pd.set_option("display.max_columns", 20)
-    df = scan(days=30)
+    days = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_DAYS
+    print(f"Scanning {days} days of history...")
+    df = scan(days=days)
     print(df.to_string(index=False))
     print()
     print("Top 5:")
