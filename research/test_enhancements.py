@@ -5,18 +5,22 @@ Reference baseline (1y ETH/USDT 1h):
 """
 from __future__ import annotations
 
+import sys as _sys, os as _os
+_THIS_DIR_PARENT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _THIS_DIR_PARENT not in _sys.path: _sys.path.insert(0, _THIS_DIR_PARENT)
+
 import pandas as pd
 
-from backtest import BTConfig, run_backtest
-from data import fetch_ohlcv
-from sentiment import fetch_fear_greed
-from strategies import donchian_breakout
-from strategies_enhanced import (
+from core.backtest import BTConfig, run_backtest
+from core.data import fetch_ohlcv
+from core.sentiment import fetch_fear_greed
+from core.strategies import donchian_breakout
+from core.strategies_enhanced import (
     donchian_strict_adx,
     with_htf_trend_filter,
     with_vol_filter,
 )
-from strategies_sentiment import donchian_skip_fear
+from core.strategies_sentiment import donchian_skip_fear
 
 PARAMS = dict(entry_n=20, exit_n=10, adx_n=14, adx_min=20.0,
               atr_n=14, sl_mult=2.5, tp_mult=5.0)

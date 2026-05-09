@@ -10,13 +10,17 @@ Usage:
 """
 from __future__ import annotations
 
+import sys as _sys, os as _os
+_THIS_DIR_PARENT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _THIS_DIR_PARENT not in _sys.path: _sys.path.insert(0, _THIS_DIR_PARENT)
+
 import sys
 
 import pandas as pd
 
-from backtest import BTConfig, run_backtest
-from data import fetch_ohlcv
-from strategies import donchian_breakout
+from core.backtest import BTConfig, run_backtest
+from core.data import fetch_ohlcv
+from core.strategies import donchian_breakout
 
 CHOSEN = dict(entry_n=20, exit_n=10, adx_n=14, adx_min=20.0,
               atr_n=14, sl_mult=2.5, tp_mult=5.0)

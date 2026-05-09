@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from strategies import (
+from core.strategies import (
     triple_confirm_long,
     ema_trend,
     macd_trend,

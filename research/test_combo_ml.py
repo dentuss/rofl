@@ -8,21 +8,25 @@ Goal: lift monthly median from ~1-2% toward 4-5%.
 """
 from __future__ import annotations
 
+import sys as _sys, os as _os
+_THIS_DIR_PARENT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _THIS_DIR_PARENT not in _sys.path: _sys.path.insert(0, _THIS_DIR_PARENT)
+
 import time
 
 import numpy as np
 import pandas as pd
 
-from backtest import BTConfig, run_backtest
-from data import fetch_ohlcv
-from ml_filter import (
+from core.backtest import BTConfig, run_backtest
+from core.data import fetch_ohlcv
+from core.ml_filter import (
     build_features,
     filter_signals_by_proba,
     label_signals,
     walk_forward_predict,
 )
-from sentiment import fetch_fear_greed
-from strategies import triple_confirm_long
+from core.sentiment import fetch_fear_greed
+from core.strategies import triple_confirm_long
 
 BASE = dict(ema_fast=9, ema_slow=26, ema_trend=50,
             rsi_min=55.0, adx_min=22.0,

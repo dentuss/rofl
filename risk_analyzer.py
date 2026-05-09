@@ -13,15 +13,15 @@ import sys
 import numpy as np
 import pandas as pd
 
-from backtest import BTConfig, run_backtest
-from data import fetch_ohlcv
-from quant_models import (
+from core.backtest import BTConfig, run_backtest
+from core.data import fetch_ohlcv
+from core.quant_models import (
     edge_significance,
     kelly_fraction,
     mc_summary,
     monte_carlo_paths,
 )
-from strategies import triple_confirm_long
+from core.strategies import triple_confirm_long
 
 BASE = dict(ema_fast=9, ema_slow=26, ema_trend=50,
             rsi_min=55.0, adx_min=22.0,

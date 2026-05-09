@@ -28,13 +28,17 @@ across multiple regimes (bull/bear/chop) before believing a strategy.
 """
 from __future__ import annotations
 
+import sys as _sys, os as _os
+_THIS_DIR_PARENT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _THIS_DIR_PARENT not in _sys.path: _sys.path.insert(0, _THIS_DIR_PARENT)
+
 import pandas as pd
 
-from backtest import BTConfig, run_backtest
-from data import fetch_ohlcv
-from portfolio import run_portfolio
-from strategies import triple_confirm_long
-from strategies_enhanced import with_htf_trend_filter
+from core.backtest import BTConfig, run_backtest
+from core.data import fetch_ohlcv
+from core.portfolio import run_portfolio
+from core.strategies import triple_confirm_long
+from core.strategies_enhanced import with_htf_trend_filter
 
 CHOSEN = dict(ema_fast=9, ema_slow=26, ema_trend=50,
               rsi_min=55.0, adx_min=22.0,

@@ -14,7 +14,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 
-from indicators import (
+from core.indicators import (
     adx,
     atr,
     bollinger,
