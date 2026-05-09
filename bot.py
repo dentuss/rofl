@@ -81,11 +81,23 @@ PRESETS = {
     "aggressive":   ("triple_long", "SOL/USDT", "30m", 0.025, 5.0, False, False, False),
     "yolo":         ("triple_long", "SOL/USDT", "30m", 0.030, 5.0, False, False, False),
 
-    # Safer variants with equity-curve risk decay enabled
-    # (set EQ_RISK_DECAY=0.5 + DD_FOR_DECAY=0.20 explicitly via env)
-    # Backtest 5y: r=2% safer => CAGR +84% / MDD -47% (vs no-decay -63%)
+    # Safer SOL variants with equity-curve risk decay enabled
+    # 5y r=2% + decay: CAGR +84% / MDD -47% (vs no-decay -63%)
     "safer_growth":      ("triple_long", "SOL/USDT", "30m", 0.015, 5.0, False, False, False),
     "safer_high_return": ("triple_long", "SOL/USDT", "30m", 0.020, 5.0, False, False, False),
+
+    # INJ 1h — DISCOVERED BEST PAIR/TF on 5y data:
+    # Profitable every year incl. 2022 bear; lower MDD than SOL; higher Sharpe.
+    # 5y stats:
+    #   inj_growth        r=1.5%        CAGR +76%  MDD -29%  Sharpe 1.79  med +3.83%/mo
+    #   inj_high_return   r=2.0%        CAGR +109% MDD -38%  Sharpe 1.82  med +4.98%/mo
+    #   inj_aggressive    r=2.5%        CAGR +146% MDD -45%  Sharpe 1.83  med +6.07%/mo
+    #   safer_inj_growth  r=1.5%+decay  CAGR +X%   MDD ~-25% (recommended low-DD high-monthly)
+    "inj_growth":            ("triple_long", "INJ/USDT", "1h", 0.015, 5.0, False, False, False),
+    "inj_high_return":       ("triple_long", "INJ/USDT", "1h", 0.020, 5.0, False, False, False),
+    "inj_aggressive":        ("triple_long", "INJ/USDT", "1h", 0.025, 5.0, False, False, False),
+    "safer_inj_growth":      ("triple_long", "INJ/USDT", "1h", 0.015, 5.0, False, False, False),
+    "safer_inj_high_return": ("triple_long", "INJ/USDT", "1h", 0.020, 5.0, False, False, False),
 
     # AVAX 30m — SOL's distant cousin, alternative growth pair
     # Backtest 5y: CAGR +41% / MDD -52% / monthly median +1.3%
@@ -97,7 +109,8 @@ PRESETS = {
 }
 
 # Presets that auto-enable equity-curve decay
-SAFER_PRESETS = {"safer_growth", "safer_high_return"}
+SAFER_PRESETS = {"safer_growth", "safer_high_return",
+                 "safer_inj_growth", "safer_inj_high_return"}
 
 
 # ----------------------------- Configuration --------------------------------
