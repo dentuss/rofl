@@ -40,7 +40,7 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
                           long_only: bool = False):
     if cfg is None:
         cfg = EnhancedBTConfig()
-    from indicators import atr as atr_fn
+    from core.indicators import atr as atr_fn
 
     df = price_df.join(sig_df, how="inner").copy()
     df["sig_next"] = df["signal"].shift(1).fillna(0).astype(int)

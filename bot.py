@@ -61,13 +61,22 @@ from core.strategies import donchian_breakout, triple_confirm_long
 from core.strategies_enhanced import with_htf_trend_filter
 from core.strategies_sentiment import donchian_skip_fear
 
+# Optional ML regime detector — imported lazily so missing sklearn doesn't
+# break the bot for users who don't enable adaptive presets.
+try:
+    from core.regime_strategy import fit_predict_full as _regime_fit_predict
+    REGIME_AVAILABLE = True
+except Exception:
+    REGIME_AVAILABLE = False
+
 
 # Strategy presets. Each row defines:
 #   (strategy, symbol, timeframe, risk_per_trade, max_leverage,
 #    use_sentiment, use_htf_filter, allow_short)
 # Backtest evidence in the docstring at the top of this file.
 # `safer_*` presets enable equity-curve risk decay (0.5x risk after -20% DD)
-# for ~25% better Sharpe and ~30% lower MDD at modest return cost.
+# `adaptive_*` presets add ML regime detection — skip new entries when
+# the current market regime is detected as BEAR.
 PRESETS = {
     # Conservative (steady-default) — ETH 1h, low MDD, modest monthly return
     "steady":       ("triple_long", "ETH/USDT", "1h",  0.015, 3.0, False, False, False),
@@ -99,6 +108,12 @@ PRESETS = {
     "safer_inj_growth":      ("triple_long", "INJ/USDT", "1h", 0.015, 5.0, False, False, False),
     "safer_inj_high_return": ("triple_long", "INJ/USDT", "1h", 0.020, 5.0, False, False, False),
 
+    # ML adaptive — INJ + skip new entries when current regime is BEAR
+    # 5y backtest with walk-forward regime detection:
+    #   adaptive_inj_high_return: CAGR +113% MDD -31% Sharpe 1.87 (vs +109%/-38%/1.82 fixed)
+    "adaptive_inj_growth":      ("triple_long", "INJ/USDT", "1h", 0.015, 5.0, False, False, False),
+    "adaptive_inj_high_return": ("triple_long", "INJ/USDT", "1h", 0.020, 5.0, False, False, False),
+
     # AVAX 30m — SOL's distant cousin, alternative growth pair
     # Backtest 5y: CAGR +41% / MDD -52% / monthly median +1.3%
     "avax_growth":  ("triple_long", "AVAX/USDT", "30m", 0.015, 5.0, False, False, False),
@@ -110,7 +125,11 @@ PRESETS = {
 
 # Presets that auto-enable equity-curve decay
 SAFER_PRESETS = {"safer_growth", "safer_high_return",
-                 "safer_inj_growth", "safer_inj_high_return"}
+                 "safer_inj_growth", "safer_inj_high_return",
+                 "adaptive_inj_growth", "adaptive_inj_high_return"}
+
+# Presets that use ML regime detection (skip BEAR)
+ADAPTIVE_PRESETS = {"adaptive_inj_growth", "adaptive_inj_high_return"}
 
 
 # ----------------------------- Configuration --------------------------------
@@ -189,6 +208,11 @@ class BotConfig:
         if self.preset in SAFER_PRESETS:
             return 0.5
         return 0.0
+
+    @property
+    def use_adaptive_regime(self) -> bool:
+        """ML regime detection — skip new entries when current regime is BEAR."""
+        return self.preset in ADAPTIVE_PRESETS
 
     @property
     def strategy(self) -> str:
@@ -319,10 +343,14 @@ class Exchange:
             df["dt"] = pd.to_datetime(df["ts_ms"], unit="ms", utc=True)
             df = df.set_index("dt")[["open", "high", "low", "close", "volume"]]
             return df
-        # Paper mode without ccxt: pull through our KuCoin data layer
+        # Paper mode without ccxt: pull through our KuCoin data layer.
+        # Estimate days from `n` bars + small buffer.
         from core.data import fetch_ohlcv
         sym = self.cfg.symbol.replace("/", "-")
-        return fetch_ohlcv(sym, self.cfg.timeframe, days=10, use_cache=False).tail(n)
+        bars_per_day = {"15m": 96, "30m": 48, "1h": 24, "4h": 6, "1d": 1}.get(
+            self.cfg.timeframe, 24)
+        days = max(10, int(n / bars_per_day) + 5)
+        return fetch_ohlcv(sym, self.cfg.timeframe, days=days, use_cache=False).tail(n)
 
     def fetch_price(self) -> float:
         if self._ccxt is not None:
@@ -399,6 +427,23 @@ class Bot:
             sig = with_htf_trend_filter(df, sig,
                                         htf_rule=self.cfg.htf_rule,
                                         ema_n=self.cfg.htf_ema_n)
+        # ML adaptive regime filter: skip new entries when current regime is BEAR
+        regime_label = None
+        if self.cfg.use_adaptive_regime and REGIME_AVAILABLE:
+            try:
+                bpd = {"15m": 96, "30m": 48, "1h": 24, "4h": 6, "1d": 1}.get(
+                    self.cfg.timeframe, 24)
+                _, _, regime_series = _regime_fit_predict(df, bars_per_day=bpd)
+                regime_label = regime_series.iloc[-1]
+                if regime_label == "BEAR":
+                    self.log.info(f"adaptive regime=BEAR, skipping new entries")
+                    sig = sig.copy()
+                    import numpy as _np
+                    sig.iloc[-1, sig.columns.get_loc("signal")] = 0
+                    sig.iloc[-1, sig.columns.get_loc("sl")] = _np.nan
+                    sig.iloc[-1, sig.columns.get_loc("tp")] = _np.nan
+            except Exception as e:
+                self.log.warning(f"regime detection failed, ignoring: {e}")
         # Use the last fully-closed bar's signal (no look-ahead)
         last = sig.iloc[-1]
         side = int(last["signal"])
@@ -527,7 +572,9 @@ class Bot:
 
     # --- main loop ----------------------------------------------------------
     def tick(self) -> None:
-        df = self.ex.fetch_recent(n=300)
+        # Adaptive regime needs ~1y of history for the GMM to fit well
+        n_bars = 1200 if self.cfg.use_adaptive_regime else 300
+        df = self.ex.fetch_recent(n=n_bars)
         warmup = max(self.cfg.entry_n, self.cfg.adx_n, self.cfg.atr_n) + 5
         if len(df) < warmup:
             self.log.warning(f"not enough bars: {len(df)}")
