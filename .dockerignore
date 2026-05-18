@@ -1,0 +1,13 @@
+.git/
+.gitignore
+.cache/
+__pycache__/
+*.pyc
+*.log
+research/
+bot_state*.json
+bot*.log
+*.parquet
+.env
+README.md
+*.md

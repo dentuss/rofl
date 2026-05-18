@@ -1,0 +1,77 @@
+# Multi-pair portfolio deployment — 3 bots in parallel.
+# Each runs an independent slice of capital. State and logs are per-bot.
+#
+# Run:
+#   docker compose -f docker-compose.portfolio.yml up -d
+#   docker compose -f docker-compose.portfolio.yml logs -f          # all bots
+#   docker compose -f docker-compose.portfolio.yml logs -f sol-bot  # one bot
+#   docker compose -f docker-compose.portfolio.yml down
+#
+# Backtest evidence (5y, $100 total split across 3 bots):
+#   ETH safer (1h, r=1.5%):  $34 -> $90    monthly med +1.4%
+#   BTC steady (1h, r=1.5%): $33 -> $95    monthly med +0.7%
+#   SOL safer (30m, r=2%):   $33 -> $570   monthly med +2.5%
+# Combined: ~5x in 5y with -22% portfolio MDD.
+
+x-bot: &bot-defaults
+  build: .
+  image: rofl-bot:latest
+  restart: unless-stopped
+  environment: &env-defaults
+    MODE: ${MODE:-paper}
+    EXCHANGE: ${EXCHANGE:-bybit}            # Bybit USDT-perp by default
+    API_KEY: ${API_KEY:-}
+    API_SECRET: ${API_SECRET:-}
+    API_PASSPHRASE: ${API_PASSPHRASE:-}     # not used by Bybit; needed for KuCoin/OKX
+    POLL_SECONDS: ${POLL_SECONDS:-30}
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  eth-bot:
+    <<: *bot-defaults
+    container_name: rofl-eth
+    environment:
+      <<: *env-defaults
+      STRATEGY_PRESET: ${PRESET_ETH:-steady}
+      STARTING_EQUITY: ${ETH_EQUITY:-34}
+    volumes:
+      - eth_state:/app/state
+      - eth_logs:/app/logs
+      - shared_cache:/app/.cache
+
+  btc-bot:
+    <<: *bot-defaults
+    container_name: rofl-btc
+    environment:
+      <<: *env-defaults
+      STRATEGY_PRESET: ${PRESET_BTC:-btc_filtered}
+      STARTING_EQUITY: ${BTC_EQUITY:-33}
+    volumes:
+      - btc_state:/app/state
+      - btc_logs:/app/logs
+      - shared_cache:/app/.cache
+
+  sol-bot:
+    <<: *bot-defaults
+    container_name: rofl-sol
+    environment:
+      <<: *env-defaults
+      STRATEGY_PRESET: ${PRESET_SOL:-safer_high_return}
+      STARTING_EQUITY: ${SOL_EQUITY:-33}
+    volumes:
+      - sol_state:/app/state
+      - sol_logs:/app/logs
+      - shared_cache:/app/.cache
+
+volumes:
+  eth_state:
+  btc_state:
+  sol_state:
+  eth_logs:
+  btc_logs:
+  sol_logs:
+  shared_cache:

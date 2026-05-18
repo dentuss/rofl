@@ -1,0 +1,50 @@
+# Single-bot deployment (recommended for first paper-trading run).
+# Multi-pair portfolio version is in docker-compose.portfolio.yml.
+#
+# Run:
+#   docker compose up -d            # start in background
+#   docker compose logs -f bot      # tail logs
+#   docker compose down             # stop (state persists in named volume)
+#
+# To switch presets, edit STRATEGY_PRESET below or pass via env.
+
+services:
+  bot:
+    build: .
+    image: rofl-bot:latest
+    container_name: rofl-bot
+    restart: unless-stopped
+    environment:
+      # ---- Strategy choice ----
+      STRATEGY_PRESET: ${STRATEGY_PRESET:-safer_inj_high_return}
+      # ---- Mode ----
+      MODE: ${MODE:-paper}            # 'paper' or 'live'
+      STARTING_EQUITY: ${STARTING_EQUITY:-100}
+      # ---- Exchange ----
+      # In paper mode: real market data via ccxt public API (no auth needed).
+      # In live mode: real orders, requires API keys below.
+      # Bybit perpetuals (USDT-linear) is the default — best fees for this bot:
+      #   taker 0.055% / maker 0.02%, all our pairs liquid, ccxt-first-class.
+      # Other supported: kucoin, okx, kraken, binance (geo-restricted in US).
+      # Use EXCHANGE=kucoin_offline to force KuCoin REST OHLCV (offline-friendly).
+      EXCHANGE: ${EXCHANGE:-bybit}
+      API_KEY: ${API_KEY:-}
+      API_SECRET: ${API_SECRET:-}
+      API_PASSPHRASE: ${API_PASSPHRASE:-}    # Bybit doesn't use one; KuCoin/OKX do
+      # ---- Logging ----
+      POLL_SECONDS: ${POLL_SECONDS:-30}
+    volumes:
+      - bot_state:/app/state
+      - bot_logs:/app/logs
+      - bot_cache:/app/.cache
+    # docker logs picks up stdout for `docker compose logs`
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  bot_state:
+  bot_logs:
+  bot_cache:

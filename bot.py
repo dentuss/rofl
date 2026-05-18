@@ -61,13 +61,22 @@ from core.strategies import donchian_breakout, triple_confirm_long
 from core.strategies_enhanced import with_htf_trend_filter
 from core.strategies_sentiment import donchian_skip_fear
 
+# Optional ML regime detector — imported lazily so missing sklearn doesn't
+# break the bot for users who don't enable adaptive presets.
+try:
+    from core.regime_strategy import fit_predict_full as _regime_fit_predict
+    REGIME_AVAILABLE = True
+except Exception:
+    REGIME_AVAILABLE = False
+
 
 # Strategy presets. Each row defines:
 #   (strategy, symbol, timeframe, risk_per_trade, max_leverage,
 #    use_sentiment, use_htf_filter, allow_short)
 # Backtest evidence in the docstring at the top of this file.
 # `safer_*` presets enable equity-curve risk decay (0.5x risk after -20% DD)
-# for ~25% better Sharpe and ~30% lower MDD at modest return cost.
+# `adaptive_*` presets add ML regime detection — skip new entries when
+# the current market regime is detected as BEAR.
 PRESETS = {
     # Conservative (steady-default) — ETH 1h, low MDD, modest monthly return
     "steady":       ("triple_long", "ETH/USDT", "1h",  0.015, 3.0, False, False, False),
@@ -99,6 +108,12 @@ PRESETS = {
     "safer_inj_growth":      ("triple_long", "INJ/USDT", "1h", 0.015, 5.0, False, False, False),
     "safer_inj_high_return": ("triple_long", "INJ/USDT", "1h", 0.020, 5.0, False, False, False),
 
+    # ML adaptive — INJ + skip new entries when current regime is BEAR
+    # 5y backtest with walk-forward regime detection:
+    #   adaptive_inj_high_return: CAGR +113% MDD -31% Sharpe 1.87 (vs +109%/-38%/1.82 fixed)
+    "adaptive_inj_growth":      ("triple_long", "INJ/USDT", "1h", 0.015, 5.0, False, False, False),
+    "adaptive_inj_high_return": ("triple_long", "INJ/USDT", "1h", 0.020, 5.0, False, False, False),
+
     # AVAX 30m — SOL's distant cousin, alternative growth pair
     # Backtest 5y: CAGR +41% / MDD -52% / monthly median +1.3%
     "avax_growth":  ("triple_long", "AVAX/USDT", "30m", 0.015, 5.0, False, False, False),
@@ -110,13 +125,17 @@ PRESETS = {
 
 # Presets that auto-enable equity-curve decay
 SAFER_PRESETS = {"safer_growth", "safer_high_return",
-                 "safer_inj_growth", "safer_inj_high_return"}
+                 "safer_inj_growth", "safer_inj_high_return",
+                 "adaptive_inj_growth", "adaptive_inj_high_return"}
+
+# Presets that use ML regime detection (skip BEAR)
+ADAPTIVE_PRESETS = {"adaptive_inj_growth", "adaptive_inj_high_return"}
 
 
 # ----------------------------- Configuration --------------------------------
 @dataclass
 class BotConfig:
-    exchange: str = os.getenv("EXCHANGE", "kucoin")
+    exchange: str = os.getenv("EXCHANGE", "bybit")
     # Preset drives symbol/tf/risk/leverage. Override via env vars below.
     preset: str = os.getenv("STRATEGY_PRESET", "steady")
     mode: str = os.getenv("MODE", "paper")  # 'paper' | 'live'
@@ -189,6 +208,11 @@ class BotConfig:
         if self.preset in SAFER_PRESETS:
             return 0.5
         return 0.0
+
+    @property
+    def use_adaptive_regime(self) -> bool:
+        """ML regime detection — skip new entries when current regime is BEAR."""
+        return self.preset in ADAPTIVE_PRESETS
 
     @property
     def strategy(self) -> str:
@@ -286,7 +310,18 @@ def setup_logging(log_file: str) -> logging.Logger:
 
 # ----------------------------- Exchange wrapper -----------------------------
 class Exchange:
-    """Thin wrapper around ccxt, with a paper-mode fallback."""
+    """Thin wrapper around ccxt, with a paper-mode fallback.
+
+    Modes:
+      live:                     ccxt client with API keys, real orders.
+      paper + ccxt-compatible:  ccxt client for REAL market data (no auth
+                                needed for public OHLCV), simulated orders.
+                                This is the recommended paper mode — real
+                                Bybit/Binance prices, no order risk.
+      paper + offline:          falls back to KuCoin REST OHLCV (our
+                                core/data.py). Used when ccxt unreachable
+                                or EXCHANGE=kucoin_offline.
+    """
     TF_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400}
 
     def __init__(self, cfg: BotConfig, log: logging.Logger):
@@ -294,40 +329,67 @@ class Exchange:
         self.log = log
         self.paper = cfg.mode == "paper"
         try:
-            import ccxt  # noqa: F401
+            import ccxt
         except ImportError:
+            ccxt = None
             if not self.paper:
                 raise RuntimeError("ccxt not installed; pip install ccxt")
-            ccxt = None
         self._ccxt = None
-        if not self.paper or os.getenv("FORCE_LIVE_DATA") == "1":
-            import ccxt
-            klass = getattr(ccxt, cfg.exchange)
-            params = {
-                "apiKey": os.getenv("API_KEY", ""),
-                "secret": os.getenv("API_SECRET", ""),
-                "password": os.getenv("API_PASSPHRASE", ""),
-                "enableRateLimit": True,
-            }
-            self._ccxt = klass({k: v for k, v in params.items() if v})
+
+        # In paper mode we still want REAL market data through ccxt's public
+        # endpoints (no auth). Skip only if user explicitly opts out.
+        offline_paper = os.getenv("EXCHANGE", "").lower() == "kucoin_offline"
+        if ccxt is not None and not offline_paper:
+            exch_name = cfg.exchange.lower().replace("kucoin_offline", "kucoin")
+            try:
+                klass = getattr(ccxt, exch_name)
+            except AttributeError:
+                self.log.warning(f"ccxt has no {exch_name} class; falling back to offline data")
+                klass = None
+            if klass is not None:
+                params = {
+                    "apiKey": os.getenv("API_KEY", ""),
+                    "secret": os.getenv("API_SECRET", ""),
+                    "password": os.getenv("API_PASSPHRASE", ""),
+                    "enableRateLimit": True,
+                }
+                # Bybit-specific: default to USDT-margined perpetuals (linear)
+                # since that's where the low fees live (0.055% taker).
+                if exch_name == "bybit":
+                    params["options"] = {"defaultType": "linear"}
+                self._ccxt = klass({k: v for k, v in params.items() if v})
 
     def fetch_recent(self, n: int = 250) -> pd.DataFrame:
         """Fetch last n closed bars (skips current forming bar in caller)."""
         if self._ccxt is not None:
-            raw = self._ccxt.fetch_ohlcv(self.cfg.symbol, self.cfg.timeframe, limit=n)
-            df = pd.DataFrame(raw, columns=["ts_ms", "open", "high", "low", "close", "volume"])
-            df["dt"] = pd.to_datetime(df["ts_ms"], unit="ms", utc=True)
-            df = df.set_index("dt")[["open", "high", "low", "close", "volume"]]
-            return df
-        # Paper mode without ccxt: pull through our KuCoin data layer
+            try:
+                raw = self._ccxt.fetch_ohlcv(self.cfg.symbol, self.cfg.timeframe,
+                                             limit=n)
+                df = pd.DataFrame(raw, columns=["ts_ms", "open", "high", "low",
+                                                "close", "volume"])
+                df["dt"] = pd.to_datetime(df["ts_ms"], unit="ms", utc=True)
+                df = df.set_index("dt")[["open", "high", "low", "close", "volume"]]
+                if len(df) >= n // 2:
+                    return df
+                self.log.warning(f"ccxt returned only {len(df)} bars; "
+                                 f"falling back to KuCoin REST")
+            except Exception as e:
+                self.log.warning(f"ccxt fetch failed ({e}); using KuCoin REST fallback")
+        # Paper-mode offline fallback: use KuCoin REST. Estimate days.
         from core.data import fetch_ohlcv
-        sym = self.cfg.symbol.replace("/", "-")
-        return fetch_ohlcv(sym, self.cfg.timeframe, days=10, use_cache=False).tail(n)
+        sym = self.cfg.symbol.replace("/", "-").replace(":USDT", "")
+        bars_per_day = {"15m": 96, "30m": 48, "1h": 24, "4h": 6, "1d": 1}.get(
+            self.cfg.timeframe, 24)
+        days = max(10, int(n / bars_per_day) + 5)
+        return fetch_ohlcv(sym, self.cfg.timeframe, days=days, use_cache=False).tail(n)
 
     def fetch_price(self) -> float:
         if self._ccxt is not None:
-            t = self._ccxt.fetch_ticker(self.cfg.symbol)
-            return float(t["last"])
+            try:
+                t = self._ccxt.fetch_ticker(self.cfg.symbol)
+                return float(t["last"])
+            except Exception as e:
+                self.log.warning(f"ccxt fetch_ticker failed ({e}); using last close")
         return float(self.fetch_recent(1)["close"].iloc[-1])
 
     def market_buy(self, qty: float) -> dict:
@@ -399,6 +461,23 @@ class Bot:
             sig = with_htf_trend_filter(df, sig,
                                         htf_rule=self.cfg.htf_rule,
                                         ema_n=self.cfg.htf_ema_n)
+        # ML adaptive regime filter: skip new entries when current regime is BEAR
+        regime_label = None
+        if self.cfg.use_adaptive_regime and REGIME_AVAILABLE:
+            try:
+                bpd = {"15m": 96, "30m": 48, "1h": 24, "4h": 6, "1d": 1}.get(
+                    self.cfg.timeframe, 24)
+                _, _, regime_series = _regime_fit_predict(df, bars_per_day=bpd)
+                regime_label = regime_series.iloc[-1]
+                if regime_label == "BEAR":
+                    self.log.info(f"adaptive regime=BEAR, skipping new entries")
+                    sig = sig.copy()
+                    import numpy as _np
+                    sig.iloc[-1, sig.columns.get_loc("signal")] = 0
+                    sig.iloc[-1, sig.columns.get_loc("sl")] = _np.nan
+                    sig.iloc[-1, sig.columns.get_loc("tp")] = _np.nan
+            except Exception as e:
+                self.log.warning(f"regime detection failed, ignoring: {e}")
         # Use the last fully-closed bar's signal (no look-ahead)
         last = sig.iloc[-1]
         side = int(last["signal"])
@@ -527,7 +606,9 @@ class Bot:
 
     # --- main loop ----------------------------------------------------------
     def tick(self) -> None:
-        df = self.ex.fetch_recent(n=300)
+        # Adaptive regime needs ~1y of history for the GMM to fit well
+        n_bars = 1200 if self.cfg.use_adaptive_regime else 300
+        df = self.ex.fetch_recent(n=n_bars)
         warmup = max(self.cfg.entry_n, self.cfg.adx_n, self.cfg.atr_n) + 5
         if len(df) < warmup:
             self.log.warning(f"not enough bars: {len(df)}")
