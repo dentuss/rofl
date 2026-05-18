@@ -1,0 +1,44 @@
+# Single-bot deployment (recommended for first paper-trading run).
+# Multi-pair portfolio version is in docker-compose.portfolio.yml.
+#
+# Run:
+#   docker compose up -d            # start in background
+#   docker compose logs -f bot      # tail logs
+#   docker compose down             # stop (state persists in named volume)
+#
+# To switch presets, edit STRATEGY_PRESET below or pass via env.
+
+services:
+  bot:
+    build: .
+    image: rofl-bot:latest
+    container_name: rofl-bot
+    restart: unless-stopped
+    environment:
+      # ---- Strategy choice ----
+      STRATEGY_PRESET: ${STRATEGY_PRESET:-safer_inj_high_return}
+      # ---- Mode ----
+      MODE: ${MODE:-paper}            # 'paper' or 'live'
+      STARTING_EQUITY: ${STARTING_EQUITY:-100}
+      # ---- Exchange (only needed if MODE=live) ----
+      EXCHANGE: ${EXCHANGE:-kucoin}
+      API_KEY: ${API_KEY:-}
+      API_SECRET: ${API_SECRET:-}
+      API_PASSPHRASE: ${API_PASSPHRASE:-}
+      # ---- Logging ----
+      POLL_SECONDS: ${POLL_SECONDS:-30}
+    volumes:
+      - bot_state:/app/state
+      - bot_logs:/app/logs
+      - bot_cache:/app/.cache
+    # docker logs picks up stdout for `docker compose logs`
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  bot_state:
+  bot_logs:
+  bot_cache:
