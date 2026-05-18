@@ -41,24 +41,54 @@ docker compose ps
 docker compose logs -f
 ```
 
-## Going live
+## Exchange — Bybit by default (paper mode)
 
-After 2 weeks of clean paper, SSH in and edit the env:
+Paper mode uses Bybit's public OHLCV API for **real market data** (no
+auth needed). Simulated orders, no funds at risk. The bot defaults to
+**Bybit USDT perpetuals** (linear): 0.055% taker / 0.02% maker fees,
+deep liquidity on INJ/SOL/ETH/BTC, best ccxt support.
+
+If Bybit is geo-blocked from your VPC, the bot transparently falls back
+to KuCoin REST for OHLCV. To force this fallback, set
+`EXCHANGE=kucoin_offline`. (Singapore = `ap-southeast-1` reaches Bybit
+fine.)
+
+## Going live on Bybit
+
+After 2 weeks of clean paper, create API keys at https://www.bybit.com/app/user/api-management
+(permissions: **Contract Trade — Orders & Positions** only; **no withdrawal**).
 
 ```bash
-cd ~/rofl
+ssh rofl
+cd rofl
 cat > .env <<EOF
 MODE=live
+EXCHANGE=bybit
 STRATEGY_PRESET=safer_inj_high_return
 STARTING_EQUITY=100
-EXCHANGE=kucoin
-API_KEY=<your_key>
-API_SECRET=<your_secret>
-API_PASSPHRASE=<your_passphrase>
+API_KEY=<your_bybit_key>
+API_SECRET=<your_bybit_secret>
+# API_PASSPHRASE is NOT needed for Bybit (leave empty)
 EOF
 chmod 600 .env
 docker compose down
 docker compose --env-file .env up -d
+```
+
+**Bybit account setup checklist** (one-time):
+1. Sign up at bybit.com, complete KYC level 1 (passport scan)
+2. Deposit USDT to your **Unified Trading Account** (UMA) — not Funding
+3. Enable USDT perpetual trading (it's the default)
+4. Set **Cross margin** mode on UMA (gives the bot full equity to size against)
+5. Generate API keys with `Contract → Trade` permission, IP-whitelist
+   your EC2 public IP
+
+### Going live on KuCoin instead
+```bash
+EXCHANGE=kucoin
+API_KEY=...
+API_SECRET=...
+API_PASSPHRASE=<required>     # KuCoin requires this; Bybit doesn't
 ```
 
 ## Switching to the 3-bot portfolio

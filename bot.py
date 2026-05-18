@@ -135,7 +135,7 @@ ADAPTIVE_PRESETS = {"adaptive_inj_growth", "adaptive_inj_high_return"}
 # ----------------------------- Configuration --------------------------------
 @dataclass
 class BotConfig:
-    exchange: str = os.getenv("EXCHANGE", "kucoin")
+    exchange: str = os.getenv("EXCHANGE", "bybit")
     # Preset drives symbol/tf/risk/leverage. Override via env vars below.
     preset: str = os.getenv("STRATEGY_PRESET", "steady")
     mode: str = os.getenv("MODE", "paper")  # 'paper' | 'live'
@@ -310,7 +310,18 @@ def setup_logging(log_file: str) -> logging.Logger:
 
 # ----------------------------- Exchange wrapper -----------------------------
 class Exchange:
-    """Thin wrapper around ccxt, with a paper-mode fallback."""
+    """Thin wrapper around ccxt, with a paper-mode fallback.
+
+    Modes:
+      live:                     ccxt client with API keys, real orders.
+      paper + ccxt-compatible:  ccxt client for REAL market data (no auth
+                                needed for public OHLCV), simulated orders.
+                                This is the recommended paper mode — real
+                                Bybit/Binance prices, no order risk.
+      paper + offline:          falls back to KuCoin REST OHLCV (our
+                                core/data.py). Used when ccxt unreachable
+                                or EXCHANGE=kucoin_offline.
+    """
     TF_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400}
 
     def __init__(self, cfg: BotConfig, log: logging.Logger):
@@ -318,35 +329,55 @@ class Exchange:
         self.log = log
         self.paper = cfg.mode == "paper"
         try:
-            import ccxt  # noqa: F401
+            import ccxt
         except ImportError:
+            ccxt = None
             if not self.paper:
                 raise RuntimeError("ccxt not installed; pip install ccxt")
-            ccxt = None
         self._ccxt = None
-        if not self.paper or os.getenv("FORCE_LIVE_DATA") == "1":
-            import ccxt
-            klass = getattr(ccxt, cfg.exchange)
-            params = {
-                "apiKey": os.getenv("API_KEY", ""),
-                "secret": os.getenv("API_SECRET", ""),
-                "password": os.getenv("API_PASSPHRASE", ""),
-                "enableRateLimit": True,
-            }
-            self._ccxt = klass({k: v for k, v in params.items() if v})
+
+        # In paper mode we still want REAL market data through ccxt's public
+        # endpoints (no auth). Skip only if user explicitly opts out.
+        offline_paper = os.getenv("EXCHANGE", "").lower() == "kucoin_offline"
+        if ccxt is not None and not offline_paper:
+            exch_name = cfg.exchange.lower().replace("kucoin_offline", "kucoin")
+            try:
+                klass = getattr(ccxt, exch_name)
+            except AttributeError:
+                self.log.warning(f"ccxt has no {exch_name} class; falling back to offline data")
+                klass = None
+            if klass is not None:
+                params = {
+                    "apiKey": os.getenv("API_KEY", ""),
+                    "secret": os.getenv("API_SECRET", ""),
+                    "password": os.getenv("API_PASSPHRASE", ""),
+                    "enableRateLimit": True,
+                }
+                # Bybit-specific: default to USDT-margined perpetuals (linear)
+                # since that's where the low fees live (0.055% taker).
+                if exch_name == "bybit":
+                    params["options"] = {"defaultType": "linear"}
+                self._ccxt = klass({k: v for k, v in params.items() if v})
 
     def fetch_recent(self, n: int = 250) -> pd.DataFrame:
         """Fetch last n closed bars (skips current forming bar in caller)."""
         if self._ccxt is not None:
-            raw = self._ccxt.fetch_ohlcv(self.cfg.symbol, self.cfg.timeframe, limit=n)
-            df = pd.DataFrame(raw, columns=["ts_ms", "open", "high", "low", "close", "volume"])
-            df["dt"] = pd.to_datetime(df["ts_ms"], unit="ms", utc=True)
-            df = df.set_index("dt")[["open", "high", "low", "close", "volume"]]
-            return df
-        # Paper mode without ccxt: pull through our KuCoin data layer.
-        # Estimate days from `n` bars + small buffer.
+            try:
+                raw = self._ccxt.fetch_ohlcv(self.cfg.symbol, self.cfg.timeframe,
+                                             limit=n)
+                df = pd.DataFrame(raw, columns=["ts_ms", "open", "high", "low",
+                                                "close", "volume"])
+                df["dt"] = pd.to_datetime(df["ts_ms"], unit="ms", utc=True)
+                df = df.set_index("dt")[["open", "high", "low", "close", "volume"]]
+                if len(df) >= n // 2:
+                    return df
+                self.log.warning(f"ccxt returned only {len(df)} bars; "
+                                 f"falling back to KuCoin REST")
+            except Exception as e:
+                self.log.warning(f"ccxt fetch failed ({e}); using KuCoin REST fallback")
+        # Paper-mode offline fallback: use KuCoin REST. Estimate days.
         from core.data import fetch_ohlcv
-        sym = self.cfg.symbol.replace("/", "-")
+        sym = self.cfg.symbol.replace("/", "-").replace(":USDT", "")
         bars_per_day = {"15m": 96, "30m": 48, "1h": 24, "4h": 6, "1d": 1}.get(
             self.cfg.timeframe, 24)
         days = max(10, int(n / bars_per_day) + 5)
@@ -354,8 +385,11 @@ class Exchange:
 
     def fetch_price(self) -> float:
         if self._ccxt is not None:
-            t = self._ccxt.fetch_ticker(self.cfg.symbol)
-            return float(t["last"])
+            try:
+                t = self._ccxt.fetch_ticker(self.cfg.symbol)
+                return float(t["last"])
+            except Exception as e:
+                self.log.warning(f"ccxt fetch_ticker failed ({e}); using last close")
         return float(self.fetch_recent(1)["close"].iloc[-1])
 
     def market_buy(self, qty: float) -> dict:

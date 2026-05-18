@@ -19,10 +19,10 @@ x-bot: &bot-defaults
   restart: unless-stopped
   environment: &env-defaults
     MODE: ${MODE:-paper}
-    EXCHANGE: ${EXCHANGE:-kucoin}
+    EXCHANGE: ${EXCHANGE:-bybit}            # Bybit USDT-perp by default
     API_KEY: ${API_KEY:-}
     API_SECRET: ${API_SECRET:-}
-    API_PASSPHRASE: ${API_PASSPHRASE:-}
+    API_PASSPHRASE: ${API_PASSPHRASE:-}     # not used by Bybit; needed for KuCoin/OKX
     POLL_SECONDS: ${POLL_SECONDS:-30}
   logging:
     driver: json-file

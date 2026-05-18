@@ -20,11 +20,17 @@ services:
       # ---- Mode ----
       MODE: ${MODE:-paper}            # 'paper' or 'live'
       STARTING_EQUITY: ${STARTING_EQUITY:-100}
-      # ---- Exchange (only needed if MODE=live) ----
-      EXCHANGE: ${EXCHANGE:-kucoin}
+      # ---- Exchange ----
+      # In paper mode: real market data via ccxt public API (no auth needed).
+      # In live mode: real orders, requires API keys below.
+      # Bybit perpetuals (USDT-linear) is the default — best fees for this bot:
+      #   taker 0.055% / maker 0.02%, all our pairs liquid, ccxt-first-class.
+      # Other supported: kucoin, okx, kraken, binance (geo-restricted in US).
+      # Use EXCHANGE=kucoin_offline to force KuCoin REST OHLCV (offline-friendly).
+      EXCHANGE: ${EXCHANGE:-bybit}
       API_KEY: ${API_KEY:-}
       API_SECRET: ${API_SECRET:-}
-      API_PASSPHRASE: ${API_PASSPHRASE:-}
+      API_PASSPHRASE: ${API_PASSPHRASE:-}    # Bybit doesn't use one; KuCoin/OKX do
       # ---- Logging ----
       POLL_SECONDS: ${POLL_SECONDS:-30}
     volumes:
