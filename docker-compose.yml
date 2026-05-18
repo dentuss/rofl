@@ -33,6 +33,10 @@ services:
       API_PASSPHRASE: ${API_PASSPHRASE:-}    # Bybit doesn't use one; KuCoin/OKX do
       # ---- Logging ----
       POLL_SECONDS: ${POLL_SECONDS:-30}
+      # ---- Telegram notifier (optional) ----
+      # Empty = notifier disabled. See core/notifier.py for setup steps.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
     volumes:
       - bot_state:/app/state
       - bot_logs:/app/logs

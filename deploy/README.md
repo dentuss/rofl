@@ -132,10 +132,8 @@ Switch back to local: `docker context use default`
 ssh rofl 'docker exec rofl-bot tail -f /app/logs/bot.log'
 ```
 
-### Option 4 — Telegram alerts (push-style)
-If you want phone notifications instead of pulling logs, see the
-`deploy/telegram_setup.md` for a minimal hook that posts trade
-events to a chat. Optional.
+### Option 4 — Telegram alerts (push to phone)
+*(Section moved above — please scroll up to the Telegram setup block.)*
 
 ## Updating to a new bot version
 
