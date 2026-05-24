@@ -47,6 +47,12 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
     df["sl_next"] = df["sl"].shift(1)
     df["tp_next"] = df["tp"].shift(1)
     df["atr14"] = atr_fn(df["high"], df["low"], df["close"], 14)
+    # Optional per-bar risk multiplier (e.g. for per-regime sizing).
+    # If absent, treated as 1.0. Shifted by 1 (no look-ahead, matches sig).
+    if "risk_mult" in df.columns:
+        df["risk_mult_next"] = df["risk_mult"].shift(1).fillna(1.0)
+    else:
+        df["risk_mult_next"] = 1.0
     if long_only or not cfg.allow_short:
         df["sig_next"] = df["sig_next"].clip(lower=0)
 
@@ -148,8 +154,9 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
             if pd.notna(sl) and pd.notna(tp) and equity > 0 and pd.notna(bar_atr):
                 entry_fill = _slip(o, sig_next, cfg.slip_bps, True)
                 stop_dist = abs(entry_fill - sl) / entry_fill
-                if stop_dist > 1e-5:
-                    risk = equity * cfg.risk_per_trade * risk_scale
+                rmult = float(row["risk_mult_next"])
+                if stop_dist > 1e-5 and rmult > 0:
+                    risk = equity * cfg.risk_per_trade * risk_scale * rmult
                     notional = min(risk / stop_dist, equity * cfg.max_leverage)
                     qty = notional / entry_fill
                     fee = notional * cfg.fee_rate
