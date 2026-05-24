@@ -24,6 +24,9 @@ x-bot: &bot-defaults
     API_SECRET: ${API_SECRET:-}
     API_PASSPHRASE: ${API_PASSPHRASE:-}     # not used by Bybit; needed for KuCoin/OKX
     POLL_SECONDS: ${POLL_SECONDS:-30}
+    # Telegram notifier (optional — empty disables it)
+    TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
   logging:
     driver: json-file
     options:

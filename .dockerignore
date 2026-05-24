@@ -11,3 +11,4 @@ bot*.log
 .env
 README.md
 *.md
+events-*.jsonl

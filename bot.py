@@ -56,6 +56,8 @@ from typing import Optional
 
 import pandas as pd
 
+from core.event_log import EventLog
+from core.notifier import Notifier
 from core.sentiment import fetch_fear_greed
 from core.strategies import donchian_breakout, triple_confirm_long
 from core.strategies_enhanced import with_htf_trend_filter
@@ -302,6 +304,7 @@ def setup_logging(log_file: str) -> logging.Logger:
     sh = logging.StreamHandler(sys.stdout)
     sh.setFormatter(fmt)
     log.addHandler(sh)
+    Path(log_file).parent.mkdir(parents=True, exist_ok=True)
     fh = logging.FileHandler(log_file)
     fh.setFormatter(fmt)
     log.addHandler(fh)
@@ -414,7 +417,12 @@ class Bot:
         self.log = setup_logging(cfg.log_file)
         self.ex = Exchange(cfg, self.log)
         self.state = State.load(cfg.state_file, cfg.starting_equity)
+        self.events = EventLog()
+        self.notifier = Notifier(mode=cfg.mode, preset=cfg.preset,
+                                 symbol=cfg.symbol, logger=self.log)
         self._stop = False
+        self._last_regime: str | None = None
+        self._last_daily_summary_day: int = 0
         signal.signal(signal.SIGINT, self._on_signal)
         signal.signal(signal.SIGTERM, self._on_signal)
 
@@ -489,6 +497,7 @@ class Bot:
             "tp": float(last["tp"]) if pd.notna(last["tp"]) else None,
             "ts": int(df.index[-1].timestamp()),
             "close": float(df["close"].iloc[-1]),
+            "regime": regime_label,
         }
 
     # --- position management -------------------------------------------------
@@ -576,6 +585,18 @@ class Bot:
             f"sl={sl:.4f} tp={tp:.4f} notional={notional:.2f} "
             f"risk={risk_dollars:.2f} equity={self.state.equity:.2f}"
         )
+        self.events.entry(side=side, qty=qty, entry_px=fill_px,
+                          sl=sl, tp=tp, notional=notional,
+                          risk_pct=risk, equity=self.state.equity,
+                          symbol=self.cfg.symbol, preset=self.cfg.preset,
+                          regime=signal_info.get("regime"))
+        try:
+            self.notifier.trade_open(side=side, qty=qty, price=fill_px,
+                                     sl=sl, tp=tp, notional=notional,
+                                     risk=risk, equity=self.state.equity,
+                                     regime=signal_info.get("regime"))
+        except Exception as e:
+            self.log.warning(f"notifier trade_open failed: {e}")
         self.state.save(self.cfg.state_file)
 
     def close_position(self, exit_px_hint: float, reason: str) -> None:
@@ -594,6 +615,7 @@ class Bot:
         # Approx round-trip fee 0.06% per side on notional
         fees = (pos.notional + fill_px * pos.qty) * 0.0006
         pnl = gross - fees
+        pct = (pnl / pos.notional * 100) if pos.notional else 0.0
         self.state.equity += pnl
         self.state.realised_trades += 1
         self.state.realised_pnl += pnl
@@ -601,11 +623,60 @@ class Bot:
             f"CLOSE {('LONG' if pos.side == 1 else 'SHORT')} {pos.qty:.6f} @ {fill_px:.4f} "
             f"reason={reason} pnl={pnl:.3f} equity={self.state.equity:.2f}"
         )
+        self.events.exit(side=pos.side, qty=pos.qty, exit_px=fill_px,
+                         entry_px=pos.entry_px, pnl=pnl, pnl_pct=pct,
+                         reason=reason, bars_held=pos.bars_open,
+                         fees=fees, notional=pos.notional,
+                         equity=self.state.equity, symbol=self.cfg.symbol,
+                         preset=self.cfg.preset)
+        try:
+            self.notifier.trade_close(side=pos.side, qty=pos.qty,
+                                      price=fill_px, pnl=pnl, reason=reason,
+                                      bars_held=pos.bars_open,
+                                      equity=self.state.equity, pct=pct)
+        except Exception as e:
+            self.log.warning(f"notifier trade_close failed: {e}")
         self.state.position = None
         self.state.save(self.cfg.state_file)
 
     # --- main loop ----------------------------------------------------------
+    def _maybe_emit_daily_summary(self) -> None:
+        """Once per UTC day, log + push a summary."""
+        cur_day = int(time.time() // 86400)
+        if cur_day <= self._last_daily_summary_day:
+            return
+        if self._last_daily_summary_day == 0:
+            # first tick — don't fire on startup
+            self._last_daily_summary_day = cur_day
+            return
+        day_pnl = self.state.equity - self.state.day_start_equity
+        wr = 0.0  # we don't track per-trade win history; approximate via realised_pnl > 0
+        if self.state.realised_trades > 0:
+            # Best-effort: positive realised PnL means at least some wins.
+            # The event log has full per-trade data for accurate stats.
+            wr = 1.0 if self.state.realised_pnl > 0 else 0.0
+        peak = max(self.state.equity_peak, self.state.equity)
+        dd = (self.state.equity / peak - 1) if peak > 0 else 0.0
+        self.events.daily_summary(equity=self.state.equity, day_pnl=day_pnl,
+                                  total_trades=self.state.realised_trades,
+                                  total_pnl=self.state.realised_pnl,
+                                  current_dd=dd,
+                                  regime=self._last_regime)
+        try:
+            self.notifier.daily_summary(equity=self.state.equity, day_pnl=day_pnl,
+                                        day_trades=0,  # not separately tracked
+                                        total_trades=self.state.realised_trades,
+                                        total_pnl=self.state.realised_pnl,
+                                        win_rate=wr, current_dd=dd,
+                                        regime=self._last_regime)
+        except Exception as e:
+            self.log.warning(f"notifier daily_summary failed: {e}")
+        self._last_daily_summary_day = cur_day
+
     def tick(self) -> None:
+        # Daily summary check (before bar processing)
+        self._maybe_emit_daily_summary()
+
         # Adaptive regime needs ~1y of history for the GMM to fit well
         n_bars = 1200 if self.cfg.use_adaptive_regime else 300
         df = self.ex.fetch_recent(n=n_bars)
@@ -630,6 +701,24 @@ class Bot:
         # 2) If no position, evaluate fresh signal
         if self.state.position is None and bar_ts > self.state.last_bar_ts:
             sig_info = self.compute_signal(df)
+            # Detect regime changes for adaptive presets and notify
+            cur_regime = sig_info.get("regime") if isinstance(sig_info, dict) else None
+            if cur_regime and cur_regime != self._last_regime:
+                if self._last_regime is not None:
+                    self.events.regime_change(from_regime=self._last_regime,
+                                              to_regime=cur_regime,
+                                              equity=self.state.equity)
+                    try:
+                        self.notifier.regime_change(self._last_regime, cur_regime,
+                                                    self.state.equity)
+                    except Exception as e:
+                        self.log.warning(f"notifier regime_change failed: {e}")
+                self._last_regime = cur_regime
+            # Log a compact tick event for forensics
+            self.events.signal(signal=sig_info["signal"],
+                               sl=sig_info.get("sl"), tp=sig_info.get("tp"),
+                               close=sig_info.get("close"),
+                               regime=cur_regime, equity=self.state.equity)
             if sig_info["signal"] != 0:
                 self.enter_position(sig_info)
 
@@ -643,6 +732,24 @@ class Bot:
                       f"strategy={self.cfg.strategy} sentiment={self.cfg.use_sentiment} "
                       f"htf={self.cfg.use_htf} short={self.cfg.allow_short} "
                       f"equity={self.state.equity:.2f}")
+        self.events.bot_start(mode=self.cfg.mode, exchange=self.cfg.exchange,
+                              symbol=self.cfg.symbol, tf=self.cfg.timeframe,
+                              preset=self.cfg.preset, strategy=self.cfg.strategy,
+                              risk_per_trade=self.cfg.risk_per_trade,
+                              max_leverage=self.cfg.max_leverage,
+                              equity=self.state.equity,
+                              adaptive=self.cfg.use_adaptive_regime,
+                              eq_decay=self.cfg.eq_risk_decay,
+                              starting_equity=self.cfg.starting_equity)
+        try:
+            self.notifier.startup(self.state.equity, extra={
+                "tf": self.cfg.timeframe,
+                "risk": f"{self.cfg.risk_per_trade * 100:.1f}%",
+                "leverage": f"{self.cfg.max_leverage:.0f}x",
+                "adaptive": str(self.cfg.use_adaptive_regime).lower(),
+            })
+        except Exception as e:
+            self.log.warning(f"notifier startup failed: {e}")
         if self.state.position:
             p = self.state.position
             self.log.info(f"resuming with open position: side={p.side} qty={p.qty:.6f} "
@@ -652,10 +759,24 @@ class Bot:
                 self.tick()
             except Exception as e:
                 self.log.exception(f"tick error: {e}")
+                self.events.error(message=str(e), exception_type=type(e).__name__)
+                try:
+                    self.notifier.error(f"tick error: {type(e).__name__}: {e}")
+                except Exception:
+                    pass
             time.sleep(self.cfg.poll_seconds)
         # Graceful: do not auto-close any position
         self.log.info(f"exiting | trades={self.state.realised_trades} "
                       f"pnl={self.state.realised_pnl:.2f} equity={self.state.equity:.2f}")
+        self.events.bot_stop(trades=self.state.realised_trades,
+                             pnl=self.state.realised_pnl,
+                             equity=self.state.equity)
+        try:
+            self.notifier.shutdown(self.state.realised_trades,
+                                   self.state.realised_pnl,
+                                   self.state.equity)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
