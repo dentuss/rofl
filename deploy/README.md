@@ -67,23 +67,27 @@ STRATEGY_PRESET=adaptive_inj_bidir
 - **INJ/USDT 1h** is the discovered best pair/tf on 5y backtest data — profitable every year incl. 2022 bear, lower MDD than SOL, higher Sharpe.
 - **Bidirectional** (`triple_bidir` strategy) takes long *and* short trades — mirror-image entry rules (EMA stack down, RSI < 45, ADX > 22, ATR-based symmetric stops).
 - **Directional regime filter** — longs only when GMM regime is BULL/CHOP, shorts only in BEAR/CHOP. Avoids countertrend trades in the wrong regime.
-- 5y walk-forward backtest (r=2%, decay=0.5):
+- **F&G extreme-zone filter** — additionally blocks longs at Fear & Greed ≥ 80 (extreme greed → likely tops) and shorts at F&G ≤ 20 (extreme fear → likely bottoms). Walk-forward 5y test: same return, MDD improved by ~6pp.
+- 5y walk-forward backtest (r=2%, decay=0.5, funding @ 1bp/8h modeled):
 
   | Preset | CAGR | MDD | Sharpe | Total return (5y) |
   |---|---|---|---|---|
   | `adaptive_inj_high_return` (long-only) | +73% | −30% | 1.51 | +1052% |
-  | **`adaptive_inj_bidir`** | **+146%** | **−33%** | **1.74** | **+3742%** |
+  | `adaptive_inj_bidir` (no F&G) | +146% | −33% | 1.74 | +3742% |
+  | **`adaptive_inj_bidir` (current, F&G on)** | **+144%** | **−28%** | **1.75** | **+3682%** |
 
-  Short trades alone in the bidir backtest: 808 trades, 43% win rate, +1722 USDT (~45% of total profit). Worst year for bidir was 2021 startup window (−1%); every full year after was positive.
+  Short trades alone in the bidir backtest: ~672 trades after F&G filter, ~43% win rate, +1526 USDT contribution. Worst year for bidir was 2021 startup window (−1%); every full year after was positive.
 
 - 2% per trade gives enough trade frequency on 1h bars (~30-40/week combined) to evaluate in 2-3 weeks.
 - Equity-curve risk decay auto-enabled (halves risk after −20% drawdown).
+- Bybit funding cost (~1bp / 8h) modeled in the backtest. Bidir's long/short mix nets to roughly zero net funding over 5y.
 
 ### Caveats before going live
 
 - Backtest is in-sample — these parameters were tuned on this same 5y data. Out-of-sample real performance will likely be lower.
-- Bybit perps have a funding rate (~±0.01% every 8h) **not** modeled in the backtest. Net cost ≈ 0.03%/day if positions are held flat against funding direction.
-- 808 short trades over 5y = ~13/month — enough volume to validate in 2-3 weeks.
+- Bybit funding rate (~±1bp / 8h) is now modeled in the backtest. Net effect on bidir is ≈0 over 5y because long pays / short receives roughly cancel.
+- The F&G filter requires a network fetch to alternative.me on each signal cycle (cached 6h). If the fetch fails the bot logs a warning and proceeds without the filter — won't break trading.
+- ~670 short trades over 5y with the F&G filter = ~11/month — enough volume to validate in 2-3 weeks.
 - Always paper-trade for 2-3 weeks before switching `MODE=live`.
 
 ### When to pick something else

@@ -159,7 +159,6 @@ def exp4_multipair_portfolio(_df, _regimes, cfg, days=5 * 365):
         eq, trades, _ = apply_funding(eq, trades, 1.0)
         per_pair[p] = stats(eq, trades)
         eqs.append(eq); total_trades.extend(trades)
-    print(f"      per-pair finals: {{p: f'${s['final']:.0f}' for p, s in per_pair.items()}}")
     for p, s in per_pair.items():
         print(f"        {p}: ${s['final']:.0f}  ret {s['ret']*100:+.0f}%  "
               f"mdd {s['mdd']*100:+.1f}%  trades {s['n']}")
