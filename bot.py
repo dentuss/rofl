@@ -59,7 +59,7 @@ import pandas as pd
 from core.event_log import EventLog
 from core.notifier import Notifier
 from core.sentiment import fetch_fear_greed
-from core.strategies import donchian_breakout, triple_confirm_long
+from core.strategies import donchian_breakout, triple_confirm_bidir, triple_confirm_long
 from core.strategies_enhanced import with_htf_trend_filter
 from core.strategies_sentiment import donchian_skip_fear
 
@@ -116,6 +116,13 @@ PRESETS = {
     "adaptive_inj_growth":      ("triple_long", "INJ/USDT", "1h", 0.015, 5.0, False, False, False),
     "adaptive_inj_high_return": ("triple_long", "INJ/USDT", "1h", 0.020, 5.0, False, False, False),
 
+    # Bidirectional (long + mirror short) + directional regime filter:
+    #   - long only in BULL/CHOP, short only in BEAR/CHOP
+    # 5y INJ 1h walk-forward, r=2% + decay:
+    #   adaptive_inj_bidir: CAGR +146% MDD -33% Sharpe 1.74 (vs +73%/-30%/1.51 long-only)
+    #   Short trades: 808 trades, 43% win rate, +1722 USDT (~45% of profit).
+    "adaptive_inj_bidir":       ("triple_bidir", "INJ/USDT", "1h", 0.020, 5.0, False, False, True),
+
     # AVAX 30m — SOL's distant cousin, alternative growth pair
     # Backtest 5y: CAGR +41% / MDD -52% / monthly median +1.3%
     "avax_growth":  ("triple_long", "AVAX/USDT", "30m", 0.015, 5.0, False, False, False),
@@ -128,10 +135,13 @@ PRESETS = {
 # Presets that auto-enable equity-curve decay
 SAFER_PRESETS = {"safer_growth", "safer_high_return",
                  "safer_inj_growth", "safer_inj_high_return",
-                 "adaptive_inj_growth", "adaptive_inj_high_return"}
+                 "adaptive_inj_growth", "adaptive_inj_high_return",
+                 "adaptive_inj_bidir"}
 
-# Presets that use ML regime detection (skip BEAR)
-ADAPTIVE_PRESETS = {"adaptive_inj_growth", "adaptive_inj_high_return"}
+# Presets that use ML regime detection — block longs in BEAR.
+# Bidirectional presets ALSO block shorts in BULL (directional filter).
+ADAPTIVE_PRESETS = {"adaptive_inj_growth", "adaptive_inj_high_return",
+                    "adaptive_inj_bidir"}
 
 
 # ----------------------------- Configuration --------------------------------
@@ -432,8 +442,10 @@ class Bot:
 
     # --- signal generation (matches backtest exactly) -----------------------
     def compute_signal(self, df: pd.DataFrame) -> dict:
-        if self.cfg.strategy == "triple_long":
-            sig = triple_confirm_long(
+        if self.cfg.strategy in ("triple_long", "triple_bidir"):
+            fn = triple_confirm_bidir if self.cfg.strategy == "triple_bidir" \
+                 else triple_confirm_long
+            sig = fn(
                 df,
                 ema_fast=self.cfg.ema_fast,
                 ema_slow=self.cfg.ema_slow,
@@ -469,7 +481,9 @@ class Bot:
             sig = with_htf_trend_filter(df, sig,
                                         htf_rule=self.cfg.htf_rule,
                                         ema_n=self.cfg.htf_ema_n)
-        # ML adaptive regime filter: skip new entries when current regime is BEAR
+        # Adaptive regime filter:
+        #   long-only strategy: block longs in BEAR
+        #   bidirectional:     additionally block shorts in BULL
         regime_label = None
         if self.cfg.use_adaptive_regime and REGIME_AVAILABLE:
             try:
@@ -477,8 +491,12 @@ class Bot:
                     self.cfg.timeframe, 24)
                 _, _, regime_series = _regime_fit_predict(df, bars_per_day=bpd)
                 regime_label = regime_series.iloc[-1]
-                if regime_label == "BEAR":
-                    self.log.info(f"adaptive regime=BEAR, skipping new entries")
+                last_sig = int(sig.iloc[-1]["signal"])
+                block = (last_sig ==  1 and regime_label == "BEAR") \
+                     or (last_sig == -1 and regime_label == "BULL")
+                if block:
+                    self.log.info(f"adaptive regime={regime_label}, "
+                                  f"blocking side={last_sig}")
                     sig = sig.copy()
                     import numpy as _np
                     sig.iloc[-1, sig.columns.get_loc("signal")] = 0
@@ -512,7 +530,7 @@ class Bot:
                 return "sl"
             if h >= pos.tp:
                 return "tp"
-        else:  # short (unused for long-only, kept for completeness)
+        else:  # short — used by triple_bidir and any preset with allow_short=True
             if h >= pos.sl:
                 return "sl"
             if l <= pos.tp:

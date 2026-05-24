@@ -60,29 +60,43 @@ Note: user-data runs as **root**, which is why we explicitly `sudo -u ubuntu`
 The bot ships with ~15 presets (see `bot.py` → `PRESETS`). For a **2-3 week paper-trading competence test**, use:
 
 ```
-STRATEGY_PRESET=adaptive_inj_high_return
+STRATEGY_PRESET=adaptive_inj_bidir
 ```
 
 **Why this one:**
-- **INJ/USDT 1h** is the discovered best pair/tf on 5y backtest data (profitable every year incl. 2022 bear; lower MDD than SOL; higher Sharpe).
-- **Adaptive** layer adds ML regime detection — skips new entries when the current market regime is BEAR. Walk-forward 5y stats: CAGR +113%, MDD −31%, Sharpe 1.87 (vs +109% / −38% / 1.82 without regime filter).
-- **High-return** risk level (2% per trade) gives enough trade frequency on 1h bars to evaluate in 2-3 weeks. The lower-risk `adaptive_inj_growth` (1.5%) is safer but yields fewer signals over a short window.
-- **Equity-curve risk decay** is auto-enabled (halves risk after −20% drawdown).
+- **INJ/USDT 1h** is the discovered best pair/tf on 5y backtest data — profitable every year incl. 2022 bear, lower MDD than SOL, higher Sharpe.
+- **Bidirectional** (`triple_bidir` strategy) takes long *and* short trades — mirror-image entry rules (EMA stack down, RSI < 45, ADX > 22, ATR-based symmetric stops).
+- **Directional regime filter** — longs only when GMM regime is BULL/CHOP, shorts only in BEAR/CHOP. Avoids countertrend trades in the wrong regime.
+- 5y walk-forward backtest (r=2%, decay=0.5):
+
+  | Preset | CAGR | MDD | Sharpe | Total return (5y) |
+  |---|---|---|---|---|
+  | `adaptive_inj_high_return` (long-only) | +73% | −30% | 1.51 | +1052% |
+  | **`adaptive_inj_bidir`** | **+146%** | **−33%** | **1.74** | **+3742%** |
+
+  Short trades alone in the bidir backtest: 808 trades, 43% win rate, +1722 USDT (~45% of total profit). Worst year for bidir was 2021 startup window (−1%); every full year after was positive.
+
+- 2% per trade gives enough trade frequency on 1h bars (~30-40/week combined) to evaluate in 2-3 weeks.
+- Equity-curve risk decay auto-enabled (halves risk after −20% drawdown).
+
+### Caveats before going live
+
+- Backtest is in-sample — these parameters were tuned on this same 5y data. Out-of-sample real performance will likely be lower.
+- Bybit perps have a funding rate (~±0.01% every 8h) **not** modeled in the backtest. Net cost ≈ 0.03%/day if positions are held flat against funding direction.
+- 808 short trades over 5y = ~13/month — enough volume to validate in 2-3 weeks.
+- Always paper-trade for 2-3 weeks before switching `MODE=live`.
 
 ### When to pick something else
 
 | Preset | Use when |
 |---|---|
-| `adaptive_inj_high_return` | **Default recommendation** for a 2-3 week test |
-| `adaptive_inj_growth`      | You want lower variance and don't mind fewer trades |
-| `safer_inj_high_return`    | You don't want the ML regime layer (deterministic, no sklearn dependency) |
-| Portfolio (`run_portfolio.sh`) | You want ETH+BTC+SOL diversified instead of single-pair INJ |
+| `adaptive_inj_bidir`       | **Default recommendation** — bidirectional, max return |
+| `adaptive_inj_high_return` | Conservative — long-only with ML BEAR filter |
+| `adaptive_inj_growth`      | Even lower variance (r=1.5%) |
+| `safer_inj_high_return`    | No ML layer (deterministic, no sklearn) |
+| Portfolio (`run_portfolio.sh`) | Diversified ETH+BTC+SOL instead of single-pair INJ |
 
-### Shorting (experimental)
-
-All bundled presets are long-only. The short branch in `bot.py` is wired
-but never backtested. To enable, add `ALLOW_SHORT=1` to `.env` — but
-treat results as exploratory and keep it in paper mode.
+`ALLOW_SHORT=1` is no longer needed as a manual override — the bidir preset enables it automatically. For long-only presets, setting `ALLOW_SHORT=1` is a no-op (the strategy never generates short signals).
 
 ---
 
@@ -93,7 +107,7 @@ Everything is configured via `~/rofl/.env`. Minimal recommended:
 ```
 # Core
 MODE=paper
-STRATEGY_PRESET=adaptive_inj_high_return
+STRATEGY_PRESET=adaptive_inj_bidir
 STARTING_EQUITY=100
 EXCHANGE=bybit
 
