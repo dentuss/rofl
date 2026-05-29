@@ -33,6 +33,13 @@ class EnhancedBTConfig(BTConfig):
     # OVERRIDES the single eq_risk_decay/drawdown_for_decay pair. Deepest
     # breached tier wins; a 0.0 multiplier stops opening new trades.
     eq_decay_tiers: tuple = ()
+    # Strategy-health gate (path-dependent): pause NEW entries when the bot's
+    # own trailing equity return over health_lookback_bars is below
+    # health_min_return. 0 lookback disables. Resumes automatically when the
+    # trailing return recovers above health_resume_return (hysteresis).
+    health_lookback_bars: int = 0
+    health_min_return: float = -0.15
+    health_resume_return: float = -0.05
 
 
 def _slip(p, side, slip_bps, is_entry):
@@ -75,6 +82,9 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
     day_start_eq = equity
     day = None
     day_blocked = False
+    # Strategy-health gate state
+    marks: list[float] = []          # equity mark history for trailing lookback
+    health_paused = False
 
     for ts, row in df.iterrows():
         o, h, l, c = row["open"], row["high"], row["low"], row["close"]
@@ -153,9 +163,20 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
                 pos_qty = 0.0
                 partial_done = False
 
+        # Strategy-health gate: pause new entries when trailing return is poor.
+        if cfg.health_lookback_bars > 0 and len(marks) > cfg.health_lookback_bars:
+            past = marks[-cfg.health_lookback_bars]
+            trailing = (equity / past - 1) if past > 0 else 0.0
+            if not health_paused and trailing < cfg.health_min_return:
+                health_paused = True
+            elif health_paused and trailing >= cfg.health_resume_return:
+                health_paused = False
+
         # 2) New entry — only if flat AND not blocked AND have signal AND
-        #    risk scaling hasn't hit a 0.0 tier (deep-drawdown hard stop)
-        if pos_side == 0 and sig_next != 0 and not day_blocked and risk_scale > 0:
+        #    risk scaling hasn't hit a 0.0 tier (deep-drawdown hard stop) AND
+        #    the strategy-health gate isn't paused
+        if (pos_side == 0 and sig_next != 0 and not day_blocked
+                and risk_scale > 0 and not health_paused):
             sl = row["sl_next"]
             tp = row["tp_next"]
             bar_atr = row["atr14"]
@@ -187,6 +208,8 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
         else:
             mark = equity
         eq_curve.append((ts, mark))
+        if cfg.health_lookback_bars > 0:
+            marks.append(mark)
 
     # Close any open position at end
     if pos_side != 0:
