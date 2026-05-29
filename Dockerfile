@@ -14,8 +14,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy code
 COPY core/ ./core/
+COPY research/ ./research/
 COPY bot.py bot_status.py risk_analyzer.py test_parity.py ./
-COPY run_portfolio.sh ./
+COPY run_portfolio.sh run_bidir_portfolio.sh ./
 
 # Cache and state directories — mounted as volumes in compose
 RUN mkdir -p /app/.cache /app/state /app/logs
