@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from core.backtest import BTConfig, Trade
+from core.risk import decay_risk_scale
 
 
 @dataclass
@@ -28,6 +29,10 @@ class EnhancedBTConfig(BTConfig):
     eq_risk_decay: float = 0.0           # 0 disables. e.g. 0.5 = halve risk after
                                           # equity DD reaches drawdown_for_decay
     drawdown_for_decay: float = 0.15      # DD threshold for risk halving
+    # Optional multi-tier decay ladder: ((depth, mult), ...). If non-empty it
+    # OVERRIDES the single eq_risk_decay/drawdown_for_decay pair. Deepest
+    # breached tier wins; a 0.0 multiplier stops opening new trades.
+    eq_decay_tiers: tuple = ()
 
 
 def _slip(p, side, slip_bps, is_entry):
@@ -86,11 +91,13 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
             if day_pnl_pct <= -cfg.daily_loss_pct:
                 day_blocked = True
 
-        # Equity-aware risk scaling
+        # Equity-aware risk scaling (single-tier or multi-tier ladder)
         eq_peak = max(eq_peak, equity)
         risk_scale = 1.0
-        if cfg.eq_risk_decay > 0:
-            cur_dd = (equity / eq_peak - 1) if eq_peak > 0 else 0
+        cur_dd = (equity / eq_peak - 1) if eq_peak > 0 else 0
+        if cfg.eq_decay_tiers:
+            risk_scale = decay_risk_scale(cur_dd, cfg.eq_decay_tiers)
+        elif cfg.eq_risk_decay > 0:
             if cur_dd <= -cfg.drawdown_for_decay:
                 risk_scale = cfg.eq_risk_decay
 
@@ -146,8 +153,9 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
                 pos_qty = 0.0
                 partial_done = False
 
-        # 2) New entry — only if flat AND not blocked AND have signal
-        if pos_side == 0 and sig_next != 0 and not day_blocked:
+        # 2) New entry — only if flat AND not blocked AND have signal AND
+        #    risk scaling hasn't hit a 0.0 tier (deep-drawdown hard stop)
+        if pos_side == 0 and sig_next != 0 and not day_blocked and risk_scale > 0:
             sl = row["sl_next"]
             tp = row["tp_next"]
             bar_atr = row["atr14"]
