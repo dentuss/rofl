@@ -79,7 +79,19 @@ STRATEGY_PRESET=adaptive_inj_bidir
   Short trades alone in the bidir backtest: ~672 trades after F&G filter, ~43% win rate, +1526 USDT contribution. Worst year for bidir was 2021 startup window (−1%); every full year after was positive.
 
 - 2% per trade gives enough trade frequency on 1h bars (~30-40/week combined) to evaluate in 2-3 weeks.
-- Equity-curve risk decay auto-enabled (halves risk after −20% drawdown).
+- Multi-tier equity decay auto-enabled (see below).
+
+### Drawdown decay ladder
+
+Decay-enabled presets scale risk down as the equity drawdown deepens, using a 3-tier ladder:
+
+| Drawdown | Risk multiplier |
+|---|---|
+| −20% | ×0.5 (halve) |
+| −35% | ×0.25 (quarter) |
+| −50% | ×0.0 (stop opening new trades) |
+
+The deepest breached tier wins; existing positions always run their own stops. On the healthy winner pairs the deeper tiers **never fire** (the −20% tier already contains the drawdown), so they cost nothing. They earn their keep on a death-spiral pair — e.g. LTC 8.3y: the ladder cut max drawdown from −69% (single-tier) to −51% *and raised* final equity (decay prevents the capital base from being destroyed beyond recovery). Override with `EQ_DECAY_TIERS="0.20:0.5,0.35:0.25,0.50:0.0"`.
 - Bybit funding cost (~1bp / 8h) modeled in the backtest. Bidir's long/short mix nets to roughly zero net funding over 5y.
 
 ### Caveats before going live
