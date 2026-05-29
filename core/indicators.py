@@ -110,3 +110,27 @@ def adx(high: pd.Series, low: pd.Series, close: pd.Series, n: int = 14) -> pd.Se
     minus_di = 100 * minus_dm.ewm(alpha=1.0 / n, adjust=False, min_periods=n).mean() / atr_n
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
     return dx.ewm(alpha=1.0 / n, adjust=False, min_periods=n).mean().fillna(0.0)
+
+
+def choppiness_index(high: pd.Series, low: pd.Series, close: pd.Series,
+                     n: int = 14) -> pd.Series:
+    """Choppiness Index (0-100). High (>61.8) = consolidating/choppy,
+    low (<38.2) = trending. Measures how much price meanders vs travels.
+
+      CI = 100 * log10( sum(TR, n) / (maxHigh_n - minLow_n) ) / log10(n)
+    """
+    tr = true_range(high, low, close)
+    tr_sum = tr.rolling(n, min_periods=n).sum()
+    rng = high.rolling(n, min_periods=n).max() - low.rolling(n, min_periods=n).min()
+    rng = rng.replace(0, np.nan)
+    ci = 100 * np.log10(tr_sum / rng) / np.log10(n)
+    return ci
+
+
+def efficiency_ratio(close: pd.Series, n: int = 14) -> pd.Series:
+    """Kaufman Efficiency Ratio (0-1). Near 1 = clean directional trend,
+    near 0 = choppy/noisy. = |net change over n| / sum(|bar changes|).
+    """
+    net = (close - close.shift(n)).abs()
+    noise = close.diff().abs().rolling(n, min_periods=n).sum().replace(0, np.nan)
+    return (net / noise).clip(0, 1)

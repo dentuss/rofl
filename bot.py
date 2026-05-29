@@ -58,8 +58,9 @@ import pandas as pd
 
 from core.event_log import EventLog
 from core.notifier import Notifier
+from core.risk import DEFAULT_DECAY_TIERS, decay_risk_scale, parse_tiers
 from core.sentiment import fetch_fear_greed
-from core.strategies import donchian_breakout, triple_confirm_long
+from core.strategies import donchian_breakout, triple_confirm_bidir, triple_confirm_long
 from core.strategies_enhanced import with_htf_trend_filter
 from core.strategies_sentiment import donchian_skip_fear
 
@@ -116,6 +117,26 @@ PRESETS = {
     "adaptive_inj_growth":      ("triple_long", "INJ/USDT", "1h", 0.015, 5.0, False, False, False),
     "adaptive_inj_high_return": ("triple_long", "INJ/USDT", "1h", 0.020, 5.0, False, False, False),
 
+    # Bidirectional (long + mirror short) + directional regime filter:
+    #   - long only in BULL/CHOP, short only in BEAR/CHOP
+    # 5y INJ 1h walk-forward, r=2% + decay + F&G extreme-zone filter (>=80 / <=20):
+    #   adaptive_inj_bidir: CAGR +140% MDD -28% Sharpe 1.75 (vs +146%/-33%/1.74 no-F&G)
+    #   F&G filter: blocks 139 extreme-greed longs + 865 extreme-fear shorts over 5y;
+    #   same return, MDD improved by ~6pp.
+    "adaptive_inj_bidir":       ("triple_bidir", "INJ/USDT", "1h", 0.020, 5.0, False, False, True),
+
+    # Same as adaptive_inj_bidir but ALSO reads dynamic (ema_fast, ema_slow,
+    # rsi_min) from state/params.json. Run research/retune.py weekly to
+    # refresh. 5y walk-forward: CAGR +176% MDD -34% Sharpe 1.84 (vs +140%/-28%/1.75 fixed).
+    "adaptive_inj_bidir_wf":    ("triple_bidir", "INJ/USDT", "1h", 0.020, 5.0, False, False, True),
+
+    # Generic bidir preset (symbol-agnostic) — identical machinery to
+    # adaptive_inj_bidir but meant to be pointed at any pair via SYMBOL=.
+    # Used by the multi-pair portfolio launcher (run_bidir_portfolio.sh /
+    # docker-compose.bidir-portfolio.yml). Validated profitable on 7 pairs
+    # (INJ/SOL/ADA/ETH/LINK Sharpe>1.1; BTC 0.77; LTC 0.30).
+    "adaptive_bidir":           ("triple_bidir", "INJ/USDT", "1h", 0.020, 5.0, False, False, True),
+
     # AVAX 30m — SOL's distant cousin, alternative growth pair
     # Backtest 5y: CAGR +41% / MDD -52% / monthly median +1.3%
     "avax_growth":  ("triple_long", "AVAX/USDT", "30m", 0.015, 5.0, False, False, False),
@@ -128,10 +149,27 @@ PRESETS = {
 # Presets that auto-enable equity-curve decay
 SAFER_PRESETS = {"safer_growth", "safer_high_return",
                  "safer_inj_growth", "safer_inj_high_return",
-                 "adaptive_inj_growth", "adaptive_inj_high_return"}
+                 "adaptive_inj_growth", "adaptive_inj_high_return",
+                 "adaptive_inj_bidir", "adaptive_inj_bidir_wf",
+                 "adaptive_bidir"}
 
-# Presets that use ML regime detection (skip BEAR)
-ADAPTIVE_PRESETS = {"adaptive_inj_growth", "adaptive_inj_high_return"}
+# Presets that use ML regime detection — block longs in BEAR.
+# Bidirectional presets ALSO block shorts in BULL (directional filter).
+ADAPTIVE_PRESETS = {"adaptive_inj_growth", "adaptive_inj_high_return",
+                    "adaptive_inj_bidir", "adaptive_inj_bidir_wf",
+                    "adaptive_bidir"}
+
+# Presets that apply the F&G extreme-zone filter on top of the bidir signal:
+#   - block longs when F&G >= 80 (extreme greed)
+#   - block shorts when F&G <= 20 (extreme fear)
+# 5y backtest on INJ 1h: same return as without, MDD improved ~6pp.
+FNG_EXTREME_PRESETS = {"adaptive_inj_bidir", "adaptive_inj_bidir_wf",
+                       "adaptive_bidir"}
+
+# Presets that read dynamic (ema_fast, ema_slow, rsi_min) from params_file
+# (written by research/retune.py). Falls back to BotConfig defaults if the
+# file is missing or unreadable.
+WF_RETUNE_PRESETS = {"adaptive_inj_bidir_wf"}
 
 
 # ----------------------------- Configuration --------------------------------
@@ -172,6 +210,10 @@ class BotConfig:
     tl_adx_min: float = 22.0
     # Sentiment filter (Crypto Fear & Greed Index)
     fear_threshold: float = float(os.getenv("FEAR_THRESHOLD", "25"))
+    # F&G extreme-zone filter (block longs at extreme greed, shorts at extreme fear)
+    fng_greed_max: float = float(os.getenv("FNG_GREED_MAX", "80"))
+    fng_fear_min: float = float(os.getenv("FNG_FEAR_MIN", "20"))
+    fng_extreme_override: str = os.getenv("FNG_EXTREME", "")
     # HTF trend filter
     htf_rule: str = os.getenv("HTF_RULE", "1D")
     htf_ema_n: int = int(os.getenv("HTF_EMA_N", "50"))
@@ -179,12 +221,20 @@ class BotConfig:
     # Auto-enabled by `safer_*` presets; can be forced via env.
     eq_risk_decay_override: str = os.getenv("EQ_RISK_DECAY", "")
     drawdown_for_decay: float = float(os.getenv("DD_FOR_DECAY", "0.20"))
+    # Multi-tier decay ladder. Overrides the single-tier pair above when set.
+    # Default (for decay-enabled presets): -20%->half, -35%->quarter, -50%->stop.
+    # Env override: EQ_DECAY_TIERS="0.20:0.5,0.35:0.25,0.50:0.0"
+    eq_decay_tiers_override: str = os.getenv("EQ_DECAY_TIERS", "")
     # Daily loss limit / circuit breaker
     daily_loss_pct: float = float(os.getenv("DAILY_LOSS_PCT", "0.0"))    # 0 disables
     # Manual overrides (otherwise read from preset)
     strategy_override: str = os.getenv("STRATEGY", "")
     use_sentiment_override: str = os.getenv("USE_SENTIMENT", "")
     use_htf_override: str = os.getenv("USE_HTF", "")
+    # Walk-forward dynamic params (read from params_file on each signal cycle).
+    # Auto-enabled for adaptive_inj_bidir_wf, or via env WF_RETUNE=1.
+    params_file: str = os.getenv("PARAMS_FILE", "state/params.json")
+    wf_retune_override: str = os.getenv("WF_RETUNE", "")
 
     @property
     def symbol(self) -> str:
@@ -212,9 +262,34 @@ class BotConfig:
         return 0.0
 
     @property
+    def eq_decay_tiers(self) -> tuple:
+        """Multi-tier decay ladder. Env override wins; otherwise decay-enabled
+        presets get the default ladder, others get an empty tuple (single-tier
+        behavior governed by eq_risk_decay)."""
+        if self.eq_decay_tiers_override:
+            return parse_tiers(self.eq_decay_tiers_override)
+        if self.preset in SAFER_PRESETS:
+            return DEFAULT_DECAY_TIERS
+        return ()
+
+    @property
     def use_adaptive_regime(self) -> bool:
         """ML regime detection — skip new entries when current regime is BEAR."""
         return self.preset in ADAPTIVE_PRESETS
+
+    @property
+    def use_fng_extreme_filter(self) -> bool:
+        """Block longs at F&G >= fng_greed_max, shorts at F&G <= fng_fear_min."""
+        if self.fng_extreme_override:
+            return self.fng_extreme_override == "1"
+        return self.preset in FNG_EXTREME_PRESETS
+
+    @property
+    def use_wf_retune(self) -> bool:
+        """Read (ema_fast, ema_slow, rsi_min) from params_file each cycle."""
+        if self.wf_retune_override:
+            return self.wf_retune_override == "1"
+        return self.preset in WF_RETUNE_PRESETS
 
     @property
     def strategy(self) -> str:
@@ -430,15 +505,44 @@ class Bot:
         self.log.info("shutdown signal received")
         self._stop = True
 
+    def _load_dynamic_params(self) -> Optional[dict]:
+        """Return (ema_fast, ema_slow, rsi_min) dict from params_file, or None."""
+        if not self.cfg.use_wf_retune:
+            return None
+        p = Path(self.cfg.params_file)
+        if not p.exists():
+            return None
+        try:
+            data = json.loads(p.read_text())
+            # cache key based on mtime; log only on change
+            mtime = p.stat().st_mtime
+            cached_mtime = getattr(self, "_params_mtime", None)
+            if cached_mtime != mtime:
+                self.log.info(f"loaded dynamic params from {p}: "
+                              f"ef={data.get('ema_fast')} es={data.get('ema_slow')} "
+                              f"rsi={data.get('rsi_min')} "
+                              f"fitted_at={data.get('fitted_at')}")
+                self._params_mtime = mtime
+            return data
+        except Exception as e:
+            self.log.warning(f"failed to load {p}: {e}")
+            return None
+
     # --- signal generation (matches backtest exactly) -----------------------
     def compute_signal(self, df: pd.DataFrame) -> dict:
-        if self.cfg.strategy == "triple_long":
-            sig = triple_confirm_long(
+        if self.cfg.strategy in ("triple_long", "triple_bidir"):
+            fn = triple_confirm_bidir if self.cfg.strategy == "triple_bidir" \
+                 else triple_confirm_long
+            dyn = self._load_dynamic_params()
+            ef = int(dyn["ema_fast"]) if dyn and "ema_fast" in dyn else self.cfg.ema_fast
+            es = int(dyn["ema_slow"]) if dyn and "ema_slow" in dyn else self.cfg.ema_slow
+            rm = float(dyn["rsi_min"]) if dyn and "rsi_min" in dyn else self.cfg.rsi_min
+            sig = fn(
                 df,
-                ema_fast=self.cfg.ema_fast,
-                ema_slow=self.cfg.ema_slow,
+                ema_fast=ef,
+                ema_slow=es,
                 ema_trend=self.cfg.ema_trend,
-                rsi_min=self.cfg.rsi_min,
+                rsi_min=rm,
                 adx_min=self.cfg.tl_adx_min,
                 atr_n=self.cfg.atr_n,
                 sl_mult=self.cfg.tl_sl_mult,
@@ -469,7 +573,31 @@ class Bot:
             sig = with_htf_trend_filter(df, sig,
                                         htf_rule=self.cfg.htf_rule,
                                         ema_n=self.cfg.htf_ema_n)
-        # ML adaptive regime filter: skip new entries when current regime is BEAR
+        # F&G extreme-zone filter (defensive overlay for bidir):
+        #   block longs at F&G >= 80 (extreme greed → tops)
+        #   block shorts at F&G <= 20 (extreme fear → bottoms)
+        fng_value = None
+        if self.cfg.use_fng_extreme_filter:
+            try:
+                fng_df = fetch_fear_greed()
+                fng_value = int(fng_df["fng"].iloc[-1])
+                last_sig = int(sig.iloc[-1]["signal"])
+                block_fng = (last_sig ==  1 and fng_value >= self.cfg.fng_greed_max) \
+                         or (last_sig == -1 and fng_value <= self.cfg.fng_fear_min)
+                if block_fng:
+                    self.log.info(f"F&G={fng_value}, blocking side={last_sig} "
+                                  f"(extremes filter)")
+                    sig = sig.copy()
+                    import numpy as _np
+                    sig.iloc[-1, sig.columns.get_loc("signal")] = 0
+                    sig.iloc[-1, sig.columns.get_loc("sl")] = _np.nan
+                    sig.iloc[-1, sig.columns.get_loc("tp")] = _np.nan
+            except Exception as e:
+                self.log.warning(f"F&G fetch failed, ignoring filter: {e}")
+
+        # Adaptive regime filter:
+        #   long-only strategy: block longs in BEAR
+        #   bidirectional:     additionally block shorts in BULL
         regime_label = None
         if self.cfg.use_adaptive_regime and REGIME_AVAILABLE:
             try:
@@ -477,8 +605,12 @@ class Bot:
                     self.cfg.timeframe, 24)
                 _, _, regime_series = _regime_fit_predict(df, bars_per_day=bpd)
                 regime_label = regime_series.iloc[-1]
-                if regime_label == "BEAR":
-                    self.log.info(f"adaptive regime=BEAR, skipping new entries")
+                last_sig = int(sig.iloc[-1]["signal"])
+                block = (last_sig ==  1 and regime_label == "BEAR") \
+                     or (last_sig == -1 and regime_label == "BULL")
+                if block:
+                    self.log.info(f"adaptive regime={regime_label}, "
+                                  f"blocking side={last_sig}")
                     sig = sig.copy()
                     import numpy as _np
                     sig.iloc[-1, sig.columns.get_loc("signal")] = 0
@@ -498,6 +630,7 @@ class Bot:
             "ts": int(df.index[-1].timestamp()),
             "close": float(df["close"].iloc[-1]),
             "regime": regime_label,
+            "fng": fng_value,
         }
 
     # --- position management -------------------------------------------------
@@ -512,7 +645,7 @@ class Bot:
                 return "sl"
             if h >= pos.tp:
                 return "tp"
-        else:  # short (unused for long-only, kept for completeness)
+        else:  # short — used by triple_bidir and any preset with allow_short=True
             if h >= pos.sl:
                 return "sl"
             if l <= pos.tp:
@@ -522,16 +655,29 @@ class Bot:
         return None
 
     def _effective_risk(self) -> float:
-        """Risk-per-trade with equity-curve decay applied."""
+        """Risk-per-trade with equity-curve decay applied.
+
+        Returns 0.0 when a 0.0-multiplier decay tier is breached (deep-drawdown
+        hard stop) — callers must skip opening a new trade in that case.
+        Uses the SAME decay_risk_scale() the backtester uses (parity).
+        """
         risk = self.cfg.risk_per_trade
-        if self.cfg.eq_risk_decay > 0:
-            self.state.equity_peak = max(self.state.equity_peak, self.state.equity)
-            if self.state.equity_peak > 0:
-                cur_dd = (self.state.equity / self.state.equity_peak) - 1
-                if cur_dd <= -self.cfg.drawdown_for_decay:
-                    risk *= self.cfg.eq_risk_decay
-                    self.log.info(f"equity-decay active: dd={cur_dd*100:.1f}% "
-                                  f"-> risk reduced to {risk*100:.2f}%")
+        self.state.equity_peak = max(self.state.equity_peak, self.state.equity)
+        cur_dd = (self.state.equity / self.state.equity_peak - 1) \
+            if self.state.equity_peak > 0 else 0.0
+        tiers = self.cfg.eq_decay_tiers
+        if tiers:
+            scale = decay_risk_scale(cur_dd, tiers)
+            if scale != 1.0:
+                self.log.info(f"equity-decay tier active: dd={cur_dd*100:.1f}% "
+                              f"-> risk scale {scale:.2f} "
+                              f"(risk {risk*scale*100:.2f}%)")
+            risk *= scale
+        elif self.cfg.eq_risk_decay > 0:
+            if cur_dd <= -self.cfg.drawdown_for_decay:
+                risk *= self.cfg.eq_risk_decay
+                self.log.info(f"equity-decay active: dd={cur_dd*100:.1f}% "
+                              f"-> risk reduced to {risk*100:.2f}%")
         return risk
 
     def _daily_loss_blocked(self) -> bool:
@@ -567,6 +713,9 @@ class Bot:
             self.log.warning("stop too tight, skipping")
             return
         risk = self._effective_risk()
+        if risk <= 0:
+            self.log.warning("deep-drawdown hard stop active — not opening new trade")
+            return
         risk_dollars = self.state.equity * risk
         notional = min(risk_dollars / stop_dist, self.state.equity * self.cfg.max_leverage)
         qty = notional / entry_px

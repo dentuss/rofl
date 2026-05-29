@@ -17,13 +17,22 @@ from pathlib import Path
 
 def main(directory: str = "."):
     root = Path(directory)
-    files = sorted(root.glob("bot_state_*.json"))
+    # Search the dir AND its state/ subdir (portfolio launchers write there).
+    search_dirs = [root]
+    if (root / "state").is_dir():
+        search_dirs.append(root / "state")
+    files = []
+    for d in search_dirs:
+        files.extend(d.glob("bot_state_*.json"))
+    files = sorted(set(files))
     if not files:
-        # also try the single-bot file
-        single = root / "bot_state.json"
-        if single.exists():
-            files = [single]
-        else:
+        # also try the single-bot file in either location
+        for d in search_dirs:
+            single = d / "bot_state.json"
+            if single.exists():
+                files = [single]
+                break
+        if not files:
             print("No bot_state*.json found.")
             return
 

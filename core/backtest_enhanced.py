@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from core.backtest import BTConfig, Trade
+from core.risk import decay_risk_scale
 
 
 @dataclass
@@ -28,6 +29,17 @@ class EnhancedBTConfig(BTConfig):
     eq_risk_decay: float = 0.0           # 0 disables. e.g. 0.5 = halve risk after
                                           # equity DD reaches drawdown_for_decay
     drawdown_for_decay: float = 0.15      # DD threshold for risk halving
+    # Optional multi-tier decay ladder: ((depth, mult), ...). If non-empty it
+    # OVERRIDES the single eq_risk_decay/drawdown_for_decay pair. Deepest
+    # breached tier wins; a 0.0 multiplier stops opening new trades.
+    eq_decay_tiers: tuple = ()
+    # Strategy-health gate (path-dependent): pause NEW entries when the bot's
+    # own trailing equity return over health_lookback_bars is below
+    # health_min_return. 0 lookback disables. Resumes automatically when the
+    # trailing return recovers above health_resume_return (hysteresis).
+    health_lookback_bars: int = 0
+    health_min_return: float = -0.15
+    health_resume_return: float = -0.05
 
 
 def _slip(p, side, slip_bps, is_entry):
@@ -47,6 +59,12 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
     df["sl_next"] = df["sl"].shift(1)
     df["tp_next"] = df["tp"].shift(1)
     df["atr14"] = atr_fn(df["high"], df["low"], df["close"], 14)
+    # Optional per-bar risk multiplier (e.g. for per-regime sizing).
+    # If absent, treated as 1.0. Shifted by 1 (no look-ahead, matches sig).
+    if "risk_mult" in df.columns:
+        df["risk_mult_next"] = df["risk_mult"].shift(1).fillna(1.0)
+    else:
+        df["risk_mult_next"] = 1.0
     if long_only or not cfg.allow_short:
         df["sig_next"] = df["sig_next"].clip(lower=0)
 
@@ -64,6 +82,9 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
     day_start_eq = equity
     day = None
     day_blocked = False
+    # Strategy-health gate state
+    marks: list[float] = []          # equity mark history for trailing lookback
+    health_paused = False
 
     for ts, row in df.iterrows():
         o, h, l, c = row["open"], row["high"], row["low"], row["close"]
@@ -80,11 +101,13 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
             if day_pnl_pct <= -cfg.daily_loss_pct:
                 day_blocked = True
 
-        # Equity-aware risk scaling
+        # Equity-aware risk scaling (single-tier or multi-tier ladder)
         eq_peak = max(eq_peak, equity)
         risk_scale = 1.0
-        if cfg.eq_risk_decay > 0:
-            cur_dd = (equity / eq_peak - 1) if eq_peak > 0 else 0
+        cur_dd = (equity / eq_peak - 1) if eq_peak > 0 else 0
+        if cfg.eq_decay_tiers:
+            risk_scale = decay_risk_scale(cur_dd, cfg.eq_decay_tiers)
+        elif cfg.eq_risk_decay > 0:
             if cur_dd <= -cfg.drawdown_for_decay:
                 risk_scale = cfg.eq_risk_decay
 
@@ -140,16 +163,29 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
                 pos_qty = 0.0
                 partial_done = False
 
-        # 2) New entry — only if flat AND not blocked AND have signal
-        if pos_side == 0 and sig_next != 0 and not day_blocked:
+        # Strategy-health gate: pause new entries when trailing return is poor.
+        if cfg.health_lookback_bars > 0 and len(marks) > cfg.health_lookback_bars:
+            past = marks[-cfg.health_lookback_bars]
+            trailing = (equity / past - 1) if past > 0 else 0.0
+            if not health_paused and trailing < cfg.health_min_return:
+                health_paused = True
+            elif health_paused and trailing >= cfg.health_resume_return:
+                health_paused = False
+
+        # 2) New entry — only if flat AND not blocked AND have signal AND
+        #    risk scaling hasn't hit a 0.0 tier (deep-drawdown hard stop) AND
+        #    the strategy-health gate isn't paused
+        if (pos_side == 0 and sig_next != 0 and not day_blocked
+                and risk_scale > 0 and not health_paused):
             sl = row["sl_next"]
             tp = row["tp_next"]
             bar_atr = row["atr14"]
             if pd.notna(sl) and pd.notna(tp) and equity > 0 and pd.notna(bar_atr):
                 entry_fill = _slip(o, sig_next, cfg.slip_bps, True)
                 stop_dist = abs(entry_fill - sl) / entry_fill
-                if stop_dist > 1e-5:
-                    risk = equity * cfg.risk_per_trade * risk_scale
+                rmult = float(row["risk_mult_next"])
+                if stop_dist > 1e-5 and rmult > 0:
+                    risk = equity * cfg.risk_per_trade * risk_scale * rmult
                     notional = min(risk / stop_dist, equity * cfg.max_leverage)
                     qty = notional / entry_fill
                     fee = notional * cfg.fee_rate
@@ -172,6 +208,8 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
         else:
             mark = equity
         eq_curve.append((ts, mark))
+        if cfg.health_lookback_bars > 0:
+            marks.append(mark)
 
     # Close any open position at end
     if pos_side != 0:

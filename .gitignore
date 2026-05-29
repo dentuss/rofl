@@ -4,6 +4,7 @@ __pycache__/
 *.parquet
 bot_state.json
 bot.log
+state/
 *.log
 .env
 .venv/

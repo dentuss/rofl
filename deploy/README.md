@@ -8,15 +8,19 @@ After launching an EC2 instance with the spec below, SSH in and run:
 curl -fsSL https://raw.githubusercontent.com/dentuss/rofl/claude/trading-bot-strategy-Uf9FR/deploy/setup.sh | bash
 ```
 
+> **Private repo?** `raw.githubusercontent.com` returns 404 for anonymous
+> requests against private repos. Either make the repo public, or use the
+> [manual clone](#manual-setup) flow with a GitHub PAT / SSH key.
+
 That single command:
-1. Installs Docker Engine for your OS (handles Amazon Linux **and** Ubuntu)
-2. Installs the Compose v2 plugin (AL2023 doesn't bundle it by default — common gotcha)
+1. Installs Docker Engine for your OS (Amazon Linux, Ubuntu 22.04, or Ubuntu 24.04)
+2. Installs the Compose v2 plugin (AL2023 doesn't bundle it — common gotcha)
 3. Adds your user to the `docker` group
 4. Clones the repo
-5. Builds the image and starts the bot in **paper mode**
+5. Builds the image and starts the bot in **paper mode** with the default preset
 6. Verifies the container is running
 
-If you'd rather do it manually, see the [Manual setup](#manual-setup) section below.
+If you'd rather do it manually, see [Manual setup](#manual-setup).
 
 ---
 
@@ -24,18 +28,18 @@ If you'd rather do it manually, see the [Manual setup](#manual-setup) section be
 
 | Setting | Pick | Why |
 |---|---|---|
-| **AMI** | **Ubuntu 22.04 LTS** (preferred) **or** Amazon Linux 2023 | Ubuntu has cleaner Docker packaging via Docker's official repo. AL2023 works but needs manual compose-plugin install (the script handles it). |
-| **Instance type** | **`t4g.small`** (ARM, ~$12/mo) | 2 vCPU + 2 GB RAM. Bot is mostly idle. Pick `arm64` AMI variant to match. |
-| **Storage** | 16 GiB gp3 | Code, cache, logs |
+| **AMI** | **Ubuntu 24.04 LTS** (confirmed working) or 22.04 or Amazon Linux 2023 | Ubuntu has cleaner Docker packaging via Docker's official repo. AL2023 works but needs manual compose-plugin install (the script handles it). |
+| **Instance type** | **`t4g.small`** (ARM, ~$12/mo) | 2 vCPU + 2 GB RAM. Bot is mostly idle. Pick the `arm64` AMI variant to match. |
+| **Storage** | 16 GiB gp3 | Code, cache, logs, sklearn wheels |
 | **Region** | **`ap-southeast-1`** (Singapore) | Closest to Bybit's API servers |
 | **Security group** | **Inbound**: SSH (22) from your IP only. **Outbound**: all | Bot only initiates outbound HTTPS |
 | **Key pair** | Create one in the same region | Needed for SSH |
 
-When you click **Launch**, you can paste this into **Advanced details → User data** (bottom of the form) for hands-off setup, OR skip it and run the curl one-liner above after first SSH:
+When you click **Launch**, paste this into **Advanced details → User data** for hands-off setup, or skip it and run the curl one-liner after first SSH:
 
 ```bash
 #!/bin/bash
-# Drop this into "User data". It will install Docker + start the bot.
+# Drop into "User data". Installs Docker + starts the bot.
 # (Ubuntu version — for AL2023 the setup.sh script auto-detects.)
 exec > /var/log/user-data.log 2>&1
 set -xe
@@ -45,10 +49,177 @@ sudo -u ubuntu bash -c 'curl -fsSL \
     | bash'
 ```
 
-Note: if you use the user-data path, check `/var/log/user-data.log` on the
-instance after boot to see what happened. User-data runs as **root**, which
-is why we explicitly `sudo -u ubuntu` (or `ec2-user` for AL2023). The setup
-script refuses to run as root.
+Note: user-data runs as **root**, which is why we explicitly `sudo -u ubuntu`
+(or `ec2-user` on AL2023). The setup script refuses to run as root. Check
+`/var/log/user-data.log` on the instance after boot to see what happened.
+
+---
+
+## Picking a preset
+
+The bot ships with ~15 presets (see `bot.py` → `PRESETS`). For a **2-3 week paper-trading competence test**, use:
+
+```
+STRATEGY_PRESET=adaptive_inj_bidir
+```
+
+**Why this one:**
+- **INJ/USDT 1h** is the discovered best pair/tf on 5y backtest data — profitable every year incl. 2022 bear, lower MDD than SOL, higher Sharpe.
+- **Bidirectional** (`triple_bidir` strategy) takes long *and* short trades — mirror-image entry rules (EMA stack down, RSI < 45, ADX > 22, ATR-based symmetric stops).
+- **Directional regime filter** — longs only when GMM regime is BULL/CHOP, shorts only in BEAR/CHOP. Avoids countertrend trades in the wrong regime.
+- **F&G extreme-zone filter** — additionally blocks longs at Fear & Greed ≥ 80 (extreme greed → likely tops) and shorts at F&G ≤ 20 (extreme fear → likely bottoms). Walk-forward 5y test: same return, MDD improved by ~6pp.
+- 5y walk-forward backtest (r=2%, decay=0.5, funding @ 1bp/8h modeled):
+
+  | Preset | CAGR | MDD | Sharpe | Total return (5y) |
+  |---|---|---|---|---|
+  | `adaptive_inj_high_return` (long-only) | +73% | −30% | 1.51 | +1052% |
+  | `adaptive_inj_bidir` (no F&G) | +146% | −33% | 1.74 | +3742% |
+  | **`adaptive_inj_bidir` (current, F&G on)** | **+144%** | **−28%** | **1.75** | **+3682%** |
+
+  Short trades alone in the bidir backtest: ~672 trades after F&G filter, ~43% win rate, +1526 USDT contribution. Worst year for bidir was 2021 startup window (−1%); every full year after was positive.
+
+- 2% per trade gives enough trade frequency on 1h bars (~30-40/week combined) to evaluate in 2-3 weeks.
+- Multi-tier equity decay auto-enabled (see below).
+
+### Drawdown decay ladder
+
+Decay-enabled presets scale risk down as the equity drawdown deepens, using a 3-tier ladder:
+
+| Drawdown | Risk multiplier |
+|---|---|
+| −20% | ×0.5 (halve) |
+| −35% | ×0.25 (quarter) |
+| −50% | ×0.0 (stop opening new trades) |
+
+The deepest breached tier wins; existing positions always run their own stops. On the healthy winner pairs the deeper tiers **never fire** (the −20% tier already contains the drawdown), so they cost nothing. They earn their keep on a death-spiral pair — e.g. LTC 8.3y: the ladder cut max drawdown from −69% (single-tier) to −51% *and raised* final equity (decay prevents the capital base from being destroyed beyond recovery). Override with `EQ_DECAY_TIERS="0.20:0.5,0.35:0.25,0.50:0.0"`.
+- Bybit funding cost (~1bp / 8h) modeled in the backtest. Bidir's long/short mix nets to roughly zero net funding over 5y.
+
+### Caveats before going live
+
+- Backtest is in-sample — these parameters were tuned on this same 5y data. Out-of-sample real performance will likely be lower.
+- Bybit funding rate (~±1bp / 8h) is now modeled in the backtest. Net effect on bidir is ≈0 over 5y because long pays / short receives roughly cancel.
+- The F&G filter requires a network fetch to alternative.me on each signal cycle (cached 6h). If the fetch fails the bot logs a warning and proceeds without the filter — won't break trading.
+- ~670 short trades over 5y with the F&G filter = ~11/month — enough volume to validate in 2-3 weeks.
+- Always paper-trade for 2-3 weeks before switching `MODE=live`.
+
+### When to pick something else
+
+| Preset | Use when |
+|---|---|
+| **Bidir portfolio** (`docker-compose.bidir-portfolio.yml`) | **Best risk-adjusted** — 5-pair diversified, MDD −18% vs −28% single-pair (see [Multi-pair portfolio](#multi-pair-bidir-portfolio)) |
+| `adaptive_inj_bidir`       | **Max return, single pair** — bidirectional INJ |
+| `adaptive_inj_bidir_wf`    | Experimental — bidir + weekly param retune (see [Walk-forward retune](#walk-forward-param-retune-optional)) |
+| `adaptive_inj_high_return` | Conservative — long-only with ML BEAR filter |
+| `adaptive_inj_growth`      | Even lower variance (r=1.5%) |
+| `safer_inj_high_return`    | No ML layer (deterministic, no sklearn) |
+
+`ALLOW_SHORT=1` is no longer needed as a manual override — the bidir preset enables it automatically. For long-only presets, setting `ALLOW_SHORT=1` is a no-op (the strategy never generates short signals).
+
+### Multi-pair bidir portfolio
+
+Runs the production bidir preset on 5 validated pairs simultaneously (INJ 40% / SOL 20% / ADA 15% / ETH 15% / LINK 10%), each as an independent bot with its own capital slice and state. Diversification's payoff is large because the bidir strategy **decorrelates** the pairs (avg pairwise monthly correlation just 0.16 — when one shorts a bear another longs a bull):
+
+| Setup | CAGR | MDD | Sharpe | Worst month | Monthly win rate |
+|---|---|---|---|---|---|
+| Single INJ (`adaptive_inj_bidir`) | +120% | −27.6% | 1.75 | −16.2% | 64% |
+| **5-pair portfolio (inj_heavy)** | **+92%** | **−18.2%** | **1.95** | **−6.6%** | **75%** |
+
+Trades ~23% of CAGR for a drawdown a human can actually hold through. Two ways to run it:
+
+**Docker (recommended on EC2):**
+```bash
+cd ~/rofl
+docker compose -f docker-compose.bidir-portfolio.yml up -d --build
+docker compose -f docker-compose.bidir-portfolio.yml logs -f          # all 5 bots
+docker compose -f docker-compose.bidir-portfolio.yml logs -f inj-bot  # one
+```
+Weights/capital are env-overridable: `INJ_EQUITY`, `SOL_EQUITY`, `ADA_EQUITY`, `ETH_EQUITY`, `LINK_EQUITY` (defaults sum to $100). For live mode put `MODE=live` + API keys in `.env` and add `--env-file .env`.
+
+**Bare launcher (non-Docker):**
+```bash
+TOTAL_EQUITY=100 ./run_bidir_portfolio.sh        # paper
+python3 bot_status.py                             # equity/PnL across all 5
+```
+
+Each bot does its own regime detection and F&G fetch on its own pair, matching the backtest exactly. The portfolio uses the generic `adaptive_bidir` preset + per-bot `SYMBOL` override.
+
+---
+
+## `.env` cheat sheet
+
+Everything is configured via `~/rofl/.env`. Minimal recommended:
+
+```
+# Core
+MODE=paper
+STRATEGY_PRESET=adaptive_inj_bidir
+STARTING_EQUITY=100
+EXCHANGE=bybit
+
+# Telegram (optional but recommended — see below)
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+
+# Live-mode only — leave blank for paper
+API_KEY=
+API_SECRET=
+API_PASSPHRASE=     # KuCoin/OKX need it; Bybit doesn't
+```
+
+After editing `.env`:
+```bash
+cd ~/rofl
+docker compose --env-file .env up -d --force-recreate
+```
+
+---
+
+## Telegram alerts (3-minute setup)
+
+Events go to your phone from **both paper and live mode**, tagged `📝 PAPER` or `🟢 LIVE`.
+
+1. Telegram → **@BotFather** → `/newbot` → save the token.
+2. Find your new bot in Telegram, send `/start` to it. **Required** — Telegram bots can't message users who haven't initiated.
+3. Telegram → **@userinfobot** (in a direct chat with userinfobot, not forwarded) → save **your** numeric chat ID. If you forward from your bot, you'll get the bot's ID and sends will fail with `403 Forbidden: the bot can't send messages to the bot`.
+4. Append to `.env`:
+   ```
+   TELEGRAM_BOT_TOKEN=7891234567:AAHxxxxxxxxx
+   TELEGRAM_CHAT_ID=123456789
+   ```
+5. `docker compose --env-file .env up -d --force-recreate`
+6. Verify: `docker compose logs bot | grep -i telegram` should show `telegram notifier enabled (chat=...)`.
+
+You'll get an instant "🚀 Bot started" message. Trades, daily summaries, regime changes, and errors arrive automatically. Missing token? Notifier silently disables itself; bot keeps running.
+
+---
+
+## Going live on Bybit (after 2-3 weeks of paper)
+
+1. Create API keys at https://www.bybit.com/app/user/api-management with:
+   - Permission: **Contract → Trade (Orders + Positions)** only
+   - **NO** withdrawal permission
+   - **IP-whitelist** your EC2 public IP
+2. Edit `~/rofl/.env`:
+   ```
+   MODE=live
+   API_KEY=<your_bybit_key>
+   API_SECRET=<your_bybit_secret>
+   ```
+3. `chmod 600 .env && docker compose --env-file .env up -d --force-recreate`
+
+Bybit account checklist (one-time):
+1. Sign up, complete KYC level 1
+2. Deposit USDT to your **Unified Trading Account** (UMA — not Funding)
+3. USDT perpetual trading is enabled by default
+4. Set **Cross margin** mode on UMA (gives the bot full equity to size against)
+
+### KuCoin instead of Bybit
+```
+EXCHANGE=kucoin
+API_KEY=...
+API_SECRET=...
+API_PASSPHRASE=<required>
+```
 
 ---
 
@@ -84,12 +255,12 @@ docker compose ps
 
 ### Amazon Linux 2023
 ```bash
-# 1. Install Docker (compose plugin NOT bundled — see step 2!)
+# 1. Install Docker (compose plugin NOT bundled — see step 2)
 sudo dnf -y update
 sudo dnf -y install docker git
 sudo systemctl enable --now docker
 
-# 2. Install compose plugin manually (this is the AL2023 gotcha)
+# 2. Install compose plugin manually (AL2023 gotcha)
 sudo mkdir -p /usr/local/lib/docker/cli-plugins
 sudo curl -fsSL \
     "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" \
@@ -99,9 +270,7 @@ sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 # 3. Allow your user to run docker
 sudo usermod -aG docker $USER
 
-# 4. (CRITICAL) Log out and back in, OR run `exec sg docker` to pick up
-#    the new group membership in your current shell. Without this, you'll
-#    get "permission denied while trying to connect to the Docker daemon".
+# 4. Pick up the new group in the current shell
 exec sg docker
 
 # 5. Pull the repo and start the bot
@@ -115,88 +284,31 @@ docker compose ps
 
 ## Verify it's working
 
-After setup, you should see something like:
 ```bash
 $ docker compose ps
 NAME       IMAGE             STATUS         PORTS
 rofl-bot   rofl-bot:latest   Up 12 seconds
 
 $ docker compose logs --tail 20
-2026-05-19 02:14:13 INFO | telegram notifier disabled (set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID)
-2026-05-19 02:14:14 INFO | starting bot mode=paper symbol=INJ/USDT tf=1h preset=safer_inj_high_return ...
+2026-05-24 02:14:13 INFO | telegram notifier enabled (chat=123456789)
+2026-05-24 02:14:14 INFO | starting bot mode=paper symbol=INJ/USDT tf=1h preset=adaptive_inj_high_return ...
 ```
 
-If `docker compose ps` shows the container running and `logs` shows a "starting bot" line, you're good.
-
----
-
-## Going live on Bybit (after 2 weeks of paper)
-
-1. Create API keys at https://www.bybit.com/app/user/api-management with:
-   - Permission: **Contract → Trade (Orders + Positions)** only
-   - **NO** withdrawal permission
-   - **IP-whitelist** your EC2 public IP
-2. SSH to the instance:
-   ```bash
-   cd ~/rofl
-   cat > .env <<'EOF'
-   MODE=live
-   EXCHANGE=bybit
-   STRATEGY_PRESET=safer_inj_high_return
-   STARTING_EQUITY=100
-   API_KEY=<your_bybit_key>
-   API_SECRET=<your_bybit_secret>
-   # No API_PASSPHRASE needed for Bybit
-   EOF
-   chmod 600 .env
-   docker compose --env-file .env up -d --force-recreate
-   ```
-
-Bybit account checklist (one-time):
-1. Sign up, complete KYC level 1
-2. Deposit USDT to your **Unified Trading Account** (UMA — not Funding)
-3. USDT perpetual trading is enabled by default
-4. Set **Cross margin** mode on UMA (gives the bot full equity to size against)
-
-### KuCoin instead of Bybit
-```bash
-EXCHANGE=kucoin
-API_KEY=...
-API_SECRET=...
-API_PASSPHRASE=<required>     # KuCoin requires this; Bybit doesn't
-```
-
----
-
-## Telegram alerts (3-minute setup)
-
-The bot has a built-in Telegram notifier — events go to your phone from **both paper and live mode**, tagged `📝 PAPER` or `🟢 LIVE`.
-
-1. On Telegram, message **@BotFather** → `/newbot` → pick a name and a username ending in `_bot`. Save the token.
-2. Search for your new bot, send `/start`.
-3. Message **@userinfobot** → save the numeric chat ID.
-4. Append to your `.env`:
-   ```
-   TELEGRAM_BOT_TOKEN=7891234567:AAHxxxxxxxxx
-   TELEGRAM_CHAT_ID=123456789
-   ```
-5. `docker compose --env-file .env up -d --force-recreate`
-
-You'll get an instant "🚀 Bot started" message. Trades, daily summaries, regime changes, and errors arrive automatically. Missing token? Notifier silently disables itself; bot keeps running.
+If `docker compose ps` shows the container running and `logs` shows a "starting bot" line, you're good. On adaptive presets you'll also see periodic `adaptive regime=BULL/CHOP/BEAR` lines once the bot has enough history.
 
 ---
 
 ## Viewing live logs from your PC
 
 ### Easiest — SSH tail
-Add to your local `~/.ssh/config`:
+Add to `~/.ssh/config` on your PC:
 ```
 Host rofl
   HostName <ec2-public-ip>
   User ubuntu      # or ec2-user for Amazon Linux
   IdentityFile ~/.ssh/your-key.pem
 ```
-Then anywhere:
+Then:
 ```bash
 ssh rofl 'cd rofl && docker compose logs -f'
 ```
@@ -213,10 +325,10 @@ docker compose logs -f          # tails the EC2 bot
 docker compose ps
 docker compose restart bot
 ```
-Switch back to local: `docker context use default`.
+Switch back: `docker context use default`.
 
 ### Structured event log — after 2-3 weeks of paper
-Every event is written to `events-YYYY-MM-DD.jsonl` inside the bot_logs volume. To analyse locally:
+Every event is written to `events-YYYY-MM-DD.jsonl` inside the `bot_logs` volume. To analyse locally:
 ```bash
 # From your PC — copy event files off the EC2 box
 mkdir -p ./bot_events
@@ -227,7 +339,6 @@ ssh rofl 'docker run --rm -v rofl_bot_logs:/from alpine \
 # Run the analyser locally
 python3 research/analyze_logs.py ./bot_events
 ```
-Paste the output back to me + the JSONL files and we'll decide whether to tune parameters.
 
 ---
 
@@ -239,6 +350,30 @@ git pull
 docker compose up -d --build       # rebuilds image, restarts
 ```
 Bot state (open positions, equity, trade history) persists in the named Docker volume across rebuilds.
+
+---
+
+## Walk-forward param retune (optional)
+
+`adaptive_inj_bidir_wf` reads `(ema_fast, ema_slow, rsi_min)` from `state/params.json` on every signal cycle. The file is produced by `research/retune.py`, which fits a grid search on the most recent 365 days of price data.
+
+5y backtest delta vs the fixed-param `adaptive_inj_bidir`:
++0.10 Sharpe, +16% final equity. Worth running weekly.
+
+**Manual retune (one-off):**
+```bash
+docker compose exec bot python3 research/retune.py
+docker compose logs bot | grep "dynamic params"   # confirm bot picked up the new file
+```
+
+**Weekly cron (set up once on the EC2 box):**
+```bash
+crontab -e
+# add:
+0 4 * * 0 cd /home/ubuntu/rofl && docker compose exec -T bot python3 research/retune.py >> /var/log/retune.log 2>&1
+```
+
+The retune script aborts (without overwriting the existing file) if the new params would have lost >5% on the most recent 30 days — a basic regression guard. The bot picks up a new `params.json` automatically on the next 30-second tick; no restart needed. Look for `loaded dynamic params from state/params.json` in the logs.
 
 ---
 
@@ -256,22 +391,24 @@ Bot state (open positions, equity, trade history) persists in the named Docker v
 
 | Symptom | Fix |
 |---|---|
+| `curl ... setup.sh` returns 404 | Repo is private. Make it public, use a PAT (`-H "Authorization: token $PAT"`), or clone manually with auth. |
 | `docker: command not found` | Setup script didn't run / user-data failed. Re-run `bash deploy/setup.sh`. |
 | `docker compose: 'compose' is not a docker command` | Compose plugin missing. On AL2023 install manually (see Manual setup step 2). |
-| `permission denied while trying to connect to the Docker daemon socket` | Your shell hasn't picked up the `docker` group yet. **Log out and back in**, or run `exec sg docker`. |
-| `docker compose up` hangs at "exporting layers" | Building wheels for pandas/numpy can take ~3 minutes on t4g.small. Be patient. |
-| `git clone` fails with `Repository not found` | Branch name in the URL must match — use `claude/trading-bot-strategy-Uf9FR` (URL-encoded slash is fine). For a private repo, set up SSH keys or use a PAT. |
-| `docker compose ps` shows status `Restarting` | Check `docker compose logs` — usually a missing env var (API_KEY in live mode) or unreachable exchange. Bot will fall back to KuCoin REST if Bybit is geo-blocked. |
+| `permission denied while trying to connect to the Docker daemon socket` | Shell hasn't picked up the `docker` group. Log out and back in, or run `exec sg docker`. |
+| `docker compose up` hangs at "exporting layers" | Building wheels for pandas/numpy/sklearn can take ~3-5 min on t4g.small. Be patient. |
+| `git clone` fails with `Repository not found` | Branch name must match (`claude/trading-bot-strategy-Uf9FR`). Private repo? Use SSH keys or a PAT. |
+| `docker compose ps` shows status `Restarting` | Check `docker compose logs` — usually a missing env var (API_KEY in live mode) or an unreachable exchange. Bot falls back to KuCoin REST if Bybit is geo-blocked. |
 | User-data ran but nothing started | User-data runs as **root**. Check `/var/log/user-data.log` and `/var/log/cloud-init-output.log`. The setup script refuses to run as root, so user-data must `sudo -u ubuntu` (or ec2-user). |
-| `ccxt` fetch fails — country block | Make sure you launched in `ap-southeast-1` (Singapore). Bybit blocks several US/EU regions. The bot falls back to KuCoin REST automatically. |
-| Bot opens trades on paper but no notifications | Check `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` and `docker compose logs` for `telegram notifier enabled`. |
+| `ccxt` fetch fails — country block | Launch in `ap-southeast-1` (Singapore). Bybit blocks several US/EU regions. Bot falls back to KuCoin REST automatically. |
+| Telegram: `403 Forbidden: the bot can't send messages to the bot` | The chat ID is your bot's, not yours. Message @userinfobot in a fresh direct chat to get **your** ID. Also send `/start` to your own bot at least once. |
+| `regime detection failed, ignoring: scikit-learn not installed` | You're on an old image. `git pull && docker compose up -d --build` — sklearn is in `requirements.txt` now. |
 
 ### Quick health checks
 ```bash
-docker compose ps                # status
-docker compose logs --tail 50    # recent log
-docker compose exec bot python3 bot_status.py    # equity, position
-docker compose exec bot ls /app/logs              # event log files
+docker compose ps                                       # status
+docker compose logs --tail 50                           # recent log
+docker compose exec bot python3 bot_status.py           # equity, position
+docker compose exec bot ls /app/logs                    # event log files
 docker compose exec bot cat /app/state/bot_state.json   # raw state
 ```
 
