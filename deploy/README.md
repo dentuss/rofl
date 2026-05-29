@@ -94,6 +94,7 @@ STRATEGY_PRESET=adaptive_inj_bidir
 
 | Preset | Use when |
 |---|---|
+| `adaptive_inj_bidir_wf`    | **Best stats** — same as bidir plus weekly param retune (see [Walk-forward retune](#walk-forward-param-retune-optional)) |
 | `adaptive_inj_bidir`       | **Default recommendation** — bidirectional, max return |
 | `adaptive_inj_high_return` | Conservative — long-only with ML BEAR filter |
 | `adaptive_inj_growth`      | Even lower variance (r=1.5%) |
@@ -309,6 +310,30 @@ git pull
 docker compose up -d --build       # rebuilds image, restarts
 ```
 Bot state (open positions, equity, trade history) persists in the named Docker volume across rebuilds.
+
+---
+
+## Walk-forward param retune (optional)
+
+`adaptive_inj_bidir_wf` reads `(ema_fast, ema_slow, rsi_min)` from `state/params.json` on every signal cycle. The file is produced by `research/retune.py`, which fits a grid search on the most recent 365 days of price data.
+
+5y backtest delta vs the fixed-param `adaptive_inj_bidir`:
++0.10 Sharpe, +16% final equity. Worth running weekly.
+
+**Manual retune (one-off):**
+```bash
+docker compose exec bot python3 research/retune.py
+docker compose logs bot | grep "dynamic params"   # confirm bot picked up the new file
+```
+
+**Weekly cron (set up once on the EC2 box):**
+```bash
+crontab -e
+# add:
+0 4 * * 0 cd /home/ubuntu/rofl && docker compose exec -T bot python3 research/retune.py >> /var/log/retune.log 2>&1
+```
+
+The retune script aborts (without overwriting the existing file) if the new params would have lost >5% on the most recent 30 days — a basic regression guard. The bot picks up a new `params.json` automatically on the next 30-second tick; no restart needed. Look for `loaded dynamic params from state/params.json` in the logs.
 
 ---
 

@@ -124,6 +124,11 @@ PRESETS = {
     #   same return, MDD improved by ~6pp.
     "adaptive_inj_bidir":       ("triple_bidir", "INJ/USDT", "1h", 0.020, 5.0, False, False, True),
 
+    # Same as adaptive_inj_bidir but ALSO reads dynamic (ema_fast, ema_slow,
+    # rsi_min) from state/params.json. Run research/retune.py weekly to
+    # refresh. 5y walk-forward: CAGR +176% MDD -34% Sharpe 1.84 (vs +140%/-28%/1.75 fixed).
+    "adaptive_inj_bidir_wf":    ("triple_bidir", "INJ/USDT", "1h", 0.020, 5.0, False, False, True),
+
     # AVAX 30m — SOL's distant cousin, alternative growth pair
     # Backtest 5y: CAGR +41% / MDD -52% / monthly median +1.3%
     "avax_growth":  ("triple_long", "AVAX/USDT", "30m", 0.015, 5.0, False, False, False),
@@ -137,18 +142,23 @@ PRESETS = {
 SAFER_PRESETS = {"safer_growth", "safer_high_return",
                  "safer_inj_growth", "safer_inj_high_return",
                  "adaptive_inj_growth", "adaptive_inj_high_return",
-                 "adaptive_inj_bidir"}
+                 "adaptive_inj_bidir", "adaptive_inj_bidir_wf"}
 
 # Presets that use ML regime detection — block longs in BEAR.
 # Bidirectional presets ALSO block shorts in BULL (directional filter).
 ADAPTIVE_PRESETS = {"adaptive_inj_growth", "adaptive_inj_high_return",
-                    "adaptive_inj_bidir"}
+                    "adaptive_inj_bidir", "adaptive_inj_bidir_wf"}
 
 # Presets that apply the F&G extreme-zone filter on top of the bidir signal:
 #   - block longs when F&G >= 80 (extreme greed)
 #   - block shorts when F&G <= 20 (extreme fear)
 # 5y backtest on INJ 1h: same return as without, MDD improved ~6pp.
-FNG_EXTREME_PRESETS = {"adaptive_inj_bidir"}
+FNG_EXTREME_PRESETS = {"adaptive_inj_bidir", "adaptive_inj_bidir_wf"}
+
+# Presets that read dynamic (ema_fast, ema_slow, rsi_min) from params_file
+# (written by research/retune.py). Falls back to BotConfig defaults if the
+# file is missing or unreadable.
+WF_RETUNE_PRESETS = {"adaptive_inj_bidir_wf"}
 
 
 # ----------------------------- Configuration --------------------------------
@@ -206,6 +216,10 @@ class BotConfig:
     strategy_override: str = os.getenv("STRATEGY", "")
     use_sentiment_override: str = os.getenv("USE_SENTIMENT", "")
     use_htf_override: str = os.getenv("USE_HTF", "")
+    # Walk-forward dynamic params (read from params_file on each signal cycle).
+    # Auto-enabled for adaptive_inj_bidir_wf, or via env WF_RETUNE=1.
+    params_file: str = os.getenv("PARAMS_FILE", "state/params.json")
+    wf_retune_override: str = os.getenv("WF_RETUNE", "")
 
     @property
     def symbol(self) -> str:
@@ -243,6 +257,13 @@ class BotConfig:
         if self.fng_extreme_override:
             return self.fng_extreme_override == "1"
         return self.preset in FNG_EXTREME_PRESETS
+
+    @property
+    def use_wf_retune(self) -> bool:
+        """Read (ema_fast, ema_slow, rsi_min) from params_file each cycle."""
+        if self.wf_retune_override:
+            return self.wf_retune_override == "1"
+        return self.preset in WF_RETUNE_PRESETS
 
     @property
     def strategy(self) -> str:
@@ -458,17 +479,44 @@ class Bot:
         self.log.info("shutdown signal received")
         self._stop = True
 
+    def _load_dynamic_params(self) -> Optional[dict]:
+        """Return (ema_fast, ema_slow, rsi_min) dict from params_file, or None."""
+        if not self.cfg.use_wf_retune:
+            return None
+        p = Path(self.cfg.params_file)
+        if not p.exists():
+            return None
+        try:
+            data = json.loads(p.read_text())
+            # cache key based on mtime; log only on change
+            mtime = p.stat().st_mtime
+            cached_mtime = getattr(self, "_params_mtime", None)
+            if cached_mtime != mtime:
+                self.log.info(f"loaded dynamic params from {p}: "
+                              f"ef={data.get('ema_fast')} es={data.get('ema_slow')} "
+                              f"rsi={data.get('rsi_min')} "
+                              f"fitted_at={data.get('fitted_at')}")
+                self._params_mtime = mtime
+            return data
+        except Exception as e:
+            self.log.warning(f"failed to load {p}: {e}")
+            return None
+
     # --- signal generation (matches backtest exactly) -----------------------
     def compute_signal(self, df: pd.DataFrame) -> dict:
         if self.cfg.strategy in ("triple_long", "triple_bidir"):
             fn = triple_confirm_bidir if self.cfg.strategy == "triple_bidir" \
                  else triple_confirm_long
+            dyn = self._load_dynamic_params()
+            ef = int(dyn["ema_fast"]) if dyn and "ema_fast" in dyn else self.cfg.ema_fast
+            es = int(dyn["ema_slow"]) if dyn and "ema_slow" in dyn else self.cfg.ema_slow
+            rm = float(dyn["rsi_min"]) if dyn and "rsi_min" in dyn else self.cfg.rsi_min
             sig = fn(
                 df,
-                ema_fast=self.cfg.ema_fast,
-                ema_slow=self.cfg.ema_slow,
+                ema_fast=ef,
+                ema_slow=es,
                 ema_trend=self.cfg.ema_trend,
-                rsi_min=self.cfg.rsi_min,
+                rsi_min=rm,
                 adx_min=self.cfg.tl_adx_min,
                 atr_n=self.cfg.atr_n,
                 sl_mult=self.cfg.tl_sl_mult,
