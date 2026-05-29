@@ -58,6 +58,7 @@ import pandas as pd
 
 from core.event_log import EventLog
 from core.notifier import Notifier
+from core.risk import DEFAULT_DECAY_TIERS, decay_risk_scale, parse_tiers
 from core.sentiment import fetch_fear_greed
 from core.strategies import donchian_breakout, triple_confirm_bidir, triple_confirm_long
 from core.strategies_enhanced import with_htf_trend_filter
@@ -220,6 +221,10 @@ class BotConfig:
     # Auto-enabled by `safer_*` presets; can be forced via env.
     eq_risk_decay_override: str = os.getenv("EQ_RISK_DECAY", "")
     drawdown_for_decay: float = float(os.getenv("DD_FOR_DECAY", "0.20"))
+    # Multi-tier decay ladder. Overrides the single-tier pair above when set.
+    # Default (for decay-enabled presets): -20%->half, -35%->quarter, -50%->stop.
+    # Env override: EQ_DECAY_TIERS="0.20:0.5,0.35:0.25,0.50:0.0"
+    eq_decay_tiers_override: str = os.getenv("EQ_DECAY_TIERS", "")
     # Daily loss limit / circuit breaker
     daily_loss_pct: float = float(os.getenv("DAILY_LOSS_PCT", "0.0"))    # 0 disables
     # Manual overrides (otherwise read from preset)
@@ -255,6 +260,17 @@ class BotConfig:
         if self.preset in SAFER_PRESETS:
             return 0.5
         return 0.0
+
+    @property
+    def eq_decay_tiers(self) -> tuple:
+        """Multi-tier decay ladder. Env override wins; otherwise decay-enabled
+        presets get the default ladder, others get an empty tuple (single-tier
+        behavior governed by eq_risk_decay)."""
+        if self.eq_decay_tiers_override:
+            return parse_tiers(self.eq_decay_tiers_override)
+        if self.preset in SAFER_PRESETS:
+            return DEFAULT_DECAY_TIERS
+        return ()
 
     @property
     def use_adaptive_regime(self) -> bool:
@@ -639,16 +655,29 @@ class Bot:
         return None
 
     def _effective_risk(self) -> float:
-        """Risk-per-trade with equity-curve decay applied."""
+        """Risk-per-trade with equity-curve decay applied.
+
+        Returns 0.0 when a 0.0-multiplier decay tier is breached (deep-drawdown
+        hard stop) — callers must skip opening a new trade in that case.
+        Uses the SAME decay_risk_scale() the backtester uses (parity).
+        """
         risk = self.cfg.risk_per_trade
-        if self.cfg.eq_risk_decay > 0:
-            self.state.equity_peak = max(self.state.equity_peak, self.state.equity)
-            if self.state.equity_peak > 0:
-                cur_dd = (self.state.equity / self.state.equity_peak) - 1
-                if cur_dd <= -self.cfg.drawdown_for_decay:
-                    risk *= self.cfg.eq_risk_decay
-                    self.log.info(f"equity-decay active: dd={cur_dd*100:.1f}% "
-                                  f"-> risk reduced to {risk*100:.2f}%")
+        self.state.equity_peak = max(self.state.equity_peak, self.state.equity)
+        cur_dd = (self.state.equity / self.state.equity_peak - 1) \
+            if self.state.equity_peak > 0 else 0.0
+        tiers = self.cfg.eq_decay_tiers
+        if tiers:
+            scale = decay_risk_scale(cur_dd, tiers)
+            if scale != 1.0:
+                self.log.info(f"equity-decay tier active: dd={cur_dd*100:.1f}% "
+                              f"-> risk scale {scale:.2f} "
+                              f"(risk {risk*scale*100:.2f}%)")
+            risk *= scale
+        elif self.cfg.eq_risk_decay > 0:
+            if cur_dd <= -self.cfg.drawdown_for_decay:
+                risk *= self.cfg.eq_risk_decay
+                self.log.info(f"equity-decay active: dd={cur_dd*100:.1f}% "
+                              f"-> risk reduced to {risk*100:.2f}%")
         return risk
 
     def _daily_loss_blocked(self) -> bool:
@@ -684,6 +713,9 @@ class Bot:
             self.log.warning("stop too tight, skipping")
             return
         risk = self._effective_risk()
+        if risk <= 0:
+            self.log.warning("deep-drawdown hard stop active — not opening new trade")
+            return
         risk_dollars = self.state.equity * risk
         notional = min(risk_dollars / stop_dist, self.state.equity * self.cfg.max_leverage)
         qty = notional / entry_px
