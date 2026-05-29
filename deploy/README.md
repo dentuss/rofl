@@ -5,7 +5,7 @@
 After launching an EC2 instance with the spec below, SSH in and run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dentuss/rofl/claude/trading-bot-strategy-Uf9FR/deploy/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dentuss/rofl/main/deploy/setup.sh | bash
 ```
 
 > **Private repo?** `raw.githubusercontent.com` returns 404 for anonymous
@@ -45,7 +45,7 @@ exec > /var/log/user-data.log 2>&1
 set -xe
 sleep 10   # let cloud-init finish initial network setup
 sudo -u ubuntu bash -c 'curl -fsSL \
-    https://raw.githubusercontent.com/dentuss/rofl/claude/trading-bot-strategy-Uf9FR/deploy/setup.sh \
+    https://raw.githubusercontent.com/dentuss/rofl/main/deploy/setup.sh \
     | bash'
 ```
 
@@ -247,7 +247,7 @@ sudo apt-get install -y docker-ce docker-ce-cli containerd.io \
 sudo usermod -aG docker $USER
 
 # 3. Pull the repo and start the bot
-git clone -b claude/trading-bot-strategy-Uf9FR https://github.com/dentuss/rofl.git
+git clone -b main https://github.com/dentuss/rofl.git
 cd rofl
 docker compose up -d --build
 docker compose ps
@@ -274,7 +274,7 @@ sudo usermod -aG docker $USER
 exec sg docker
 
 # 5. Pull the repo and start the bot
-git clone -b claude/trading-bot-strategy-Uf9FR https://github.com/dentuss/rofl.git
+git clone -b main https://github.com/dentuss/rofl.git
 cd rofl
 docker compose up -d --build
 docker compose ps
@@ -396,7 +396,7 @@ The retune script aborts (without overwriting the existing file) if the new para
 | `docker compose: 'compose' is not a docker command` | Compose plugin missing. On AL2023 install manually (see Manual setup step 2). |
 | `permission denied while trying to connect to the Docker daemon socket` | Shell hasn't picked up the `docker` group. Log out and back in, or run `exec sg docker`. |
 | `docker compose up` hangs at "exporting layers" | Building wheels for pandas/numpy/sklearn can take ~3-5 min on t4g.small. Be patient. |
-| `git clone` fails with `Repository not found` | Branch name must match (`claude/trading-bot-strategy-Uf9FR`). Private repo? Use SSH keys or a PAT. |
+| `git clone` fails with `Repository not found` | Branch name must match (`main`). Private repo? Use SSH keys or a PAT. |
 | `docker compose ps` shows status `Restarting` | Check `docker compose logs` — usually a missing env var (API_KEY in live mode) or an unreachable exchange. Bot falls back to KuCoin REST if Bybit is geo-blocked. |
 | User-data ran but nothing started | User-data runs as **root**. Check `/var/log/user-data.log` and `/var/log/cloud-init-output.log`. The setup script refuses to run as root, so user-data must `sudo -u ubuntu` (or ec2-user). |
 | `ccxt` fetch fails — country block | Launch in `ap-southeast-1` (Singapore). Bybit blocks several US/EU regions. Bot falls back to KuCoin REST automatically. |

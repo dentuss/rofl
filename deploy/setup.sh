@@ -4,7 +4,7 @@
 # Works on Amazon Linux 2023, Ubuntu 22.04/24.04, and Debian.
 #
 # Usage (from a fresh EC2 instance):
-#     curl -fsSL https://raw.githubusercontent.com/dentuss/rofl/claude/trading-bot-strategy-Uf9FR/deploy/setup.sh | bash
+#     curl -fsSL https://raw.githubusercontent.com/dentuss/rofl/main/deploy/setup.sh | bash
 #
 # Or if the repo is already cloned:
 #     bash deploy/setup.sh
@@ -29,7 +29,7 @@
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/dentuss/rofl.git}"
-REPO_BRANCH="${REPO_BRANCH:-claude/trading-bot-strategy-Uf9FR}"
+REPO_BRANCH="${REPO_BRANCH:-main}"
 REPO_DIR="${REPO_DIR:-$HOME/rofl}"
 
 log() { echo -e "\033[1;34m==>\033[0m $*"; }

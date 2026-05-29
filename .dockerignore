@@ -4,7 +4,6 @@
 __pycache__/
 *.pyc
 *.log
-research/
 bot_state*.json
 bot*.log
 *.parquet
