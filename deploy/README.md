@@ -126,14 +126,31 @@ Runs the production bidir preset on 5 validated pairs simultaneously (INJ 40% / 
 
 Trades ~23% of CAGR for a drawdown a human can actually hold through. Two ways to run it:
 
-**Docker (recommended on EC2):**
+**Docker (recommended on EC2) — `portfolio.sh` wrapper, set one total:**
 ```bash
 cd ~/rofl
-docker compose -f docker-compose.bidir-portfolio.yml up -d --build
-docker compose -f docker-compose.bidir-portfolio.yml logs -f          # all 5 bots
-docker compose -f docker-compose.bidir-portfolio.yml logs -f inj-bot  # one
+# put TOTAL_EQUITY=100 in .env (or pass it inline), then:
+sudo ./portfolio.sh up -d --build      # splits TOTAL_EQUITY 40/20/15/15/10
+sudo ./portfolio.sh logs -f            # tail all 5 bots
+sudo ./portfolio.sh ps                 # status
+sudo ./portfolio.sh down               # stop (keeps equity/state)
+sudo ./portfolio.sh down -v            # stop AND reset equity to the split
 ```
-Weights/capital are env-overridable: `INJ_EQUITY`, `SOL_EQUITY`, `ADA_EQUITY`, `ETH_EQUITY`, `LINK_EQUITY` (defaults sum to $100). For live mode put `MODE=live` + API keys in `.env` and add `--env-file .env`.
+You only set **`TOTAL_EQUITY`**; the wrapper computes each bot's slice
+(`INJ_EQUITY`…`LINK_EQUITY`) from the weights and passes them to compose.
+The weights themselves are overridable (`INJ_WEIGHT` etc.) but default to the
+validated `inj_heavy` split. Docker Compose can't do arithmetic in YAML, which
+is why the split lives in the wrapper.
+
+> **Changing the total takes effect only on a fresh state.** Each bot persists
+> its equity in a named volume; `up` after a plain `down` keeps the old equity.
+> To apply a new `TOTAL_EQUITY` to already-running bots, use `down -v` (wipes
+> state — fine in paper mode).
+
+Raw compose still works if you'd rather set the 5 vars yourself:
+```bash
+docker compose -f docker-compose.bidir-portfolio.yml --env-file .env up -d --build
+```
 
 **Bare launcher (non-Docker):**
 ```bash
@@ -141,7 +158,27 @@ TOTAL_EQUITY=100 ./run_bidir_portfolio.sh        # paper
 python3 bot_status.py                             # equity/PnL across all 5
 ```
 
-Each bot does its own regime detection and F&G fetch on its own pair, matching the backtest exactly. The portfolio uses the generic `adaptive_bidir` preset + per-bot `SYMBOL` override.
+### How the portfolio uses live equity
+
+The portfolio is **5 independent bot processes**, each with its own state file
+and its own equity pool. There is **no shared pot and no rebalancing**:
+
+- Each bot sizes positions off **its own current (live) equity** — risk-per-trade
+  is 2% of *that bot's* balance, so each slice compounds independently.
+- The 3-tier drawdown decay is also per-bot (each tracks its own equity peak).
+- Weights drift over time: a winning pair grows its share of the book; the
+  40/20/15/15/10 split is only the *starting* allocation. Re-balancing back is
+  manual (`down -v` and restart).
+- Total portfolio equity = the **sum of the 5 state files** — `bot_status.py`
+  prints each bot plus the total.
+- **Live-mode caveat:** all 5 bots trade one exchange account, but each only
+  knows its own internal equity slice — they don't see each other's positions
+  or the shared margin pool. As long as total notional fits your account margin
+  this is fine, but size `TOTAL_EQUITY` to your actual deposit, not more.
+
+Each bot does its own regime detection and F&G fetch on its own pair, matching
+the backtest exactly. The portfolio uses the generic `adaptive_bidir` preset +
+per-bot `SYMBOL` override.
 
 ---
 
