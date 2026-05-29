@@ -94,14 +94,42 @@ STRATEGY_PRESET=adaptive_inj_bidir
 
 | Preset | Use when |
 |---|---|
-| `adaptive_inj_bidir_wf`    | **Best stats** — same as bidir plus weekly param retune (see [Walk-forward retune](#walk-forward-param-retune-optional)) |
-| `adaptive_inj_bidir`       | **Default recommendation** — bidirectional, max return |
+| **Bidir portfolio** (`docker-compose.bidir-portfolio.yml`) | **Best risk-adjusted** — 5-pair diversified, MDD −18% vs −28% single-pair (see [Multi-pair portfolio](#multi-pair-bidir-portfolio)) |
+| `adaptive_inj_bidir`       | **Max return, single pair** — bidirectional INJ |
+| `adaptive_inj_bidir_wf`    | Experimental — bidir + weekly param retune (see [Walk-forward retune](#walk-forward-param-retune-optional)) |
 | `adaptive_inj_high_return` | Conservative — long-only with ML BEAR filter |
 | `adaptive_inj_growth`      | Even lower variance (r=1.5%) |
 | `safer_inj_high_return`    | No ML layer (deterministic, no sklearn) |
-| Portfolio (`run_portfolio.sh`) | Diversified ETH+BTC+SOL instead of single-pair INJ |
 
 `ALLOW_SHORT=1` is no longer needed as a manual override — the bidir preset enables it automatically. For long-only presets, setting `ALLOW_SHORT=1` is a no-op (the strategy never generates short signals).
+
+### Multi-pair bidir portfolio
+
+Runs the production bidir preset on 5 validated pairs simultaneously (INJ 40% / SOL 20% / ADA 15% / ETH 15% / LINK 10%), each as an independent bot with its own capital slice and state. Diversification's payoff is large because the bidir strategy **decorrelates** the pairs (avg pairwise monthly correlation just 0.16 — when one shorts a bear another longs a bull):
+
+| Setup | CAGR | MDD | Sharpe | Worst month | Monthly win rate |
+|---|---|---|---|---|---|
+| Single INJ (`adaptive_inj_bidir`) | +120% | −27.6% | 1.75 | −16.2% | 64% |
+| **5-pair portfolio (inj_heavy)** | **+92%** | **−18.2%** | **1.95** | **−6.6%** | **75%** |
+
+Trades ~23% of CAGR for a drawdown a human can actually hold through. Two ways to run it:
+
+**Docker (recommended on EC2):**
+```bash
+cd ~/rofl
+docker compose -f docker-compose.bidir-portfolio.yml up -d --build
+docker compose -f docker-compose.bidir-portfolio.yml logs -f          # all 5 bots
+docker compose -f docker-compose.bidir-portfolio.yml logs -f inj-bot  # one
+```
+Weights/capital are env-overridable: `INJ_EQUITY`, `SOL_EQUITY`, `ADA_EQUITY`, `ETH_EQUITY`, `LINK_EQUITY` (defaults sum to $100). For live mode put `MODE=live` + API keys in `.env` and add `--env-file .env`.
+
+**Bare launcher (non-Docker):**
+```bash
+TOTAL_EQUITY=100 ./run_bidir_portfolio.sh        # paper
+python3 bot_status.py                             # equity/PnL across all 5
+```
+
+Each bot does its own regime detection and F&G fetch on its own pair, matching the backtest exactly. The portfolio uses the generic `adaptive_bidir` preset + per-bot `SYMBOL` override.
 
 ---
 

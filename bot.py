@@ -129,6 +129,13 @@ PRESETS = {
     # refresh. 5y walk-forward: CAGR +176% MDD -34% Sharpe 1.84 (vs +140%/-28%/1.75 fixed).
     "adaptive_inj_bidir_wf":    ("triple_bidir", "INJ/USDT", "1h", 0.020, 5.0, False, False, True),
 
+    # Generic bidir preset (symbol-agnostic) — identical machinery to
+    # adaptive_inj_bidir but meant to be pointed at any pair via SYMBOL=.
+    # Used by the multi-pair portfolio launcher (run_bidir_portfolio.sh /
+    # docker-compose.bidir-portfolio.yml). Validated profitable on 7 pairs
+    # (INJ/SOL/ADA/ETH/LINK Sharpe>1.1; BTC 0.77; LTC 0.30).
+    "adaptive_bidir":           ("triple_bidir", "INJ/USDT", "1h", 0.020, 5.0, False, False, True),
+
     # AVAX 30m — SOL's distant cousin, alternative growth pair
     # Backtest 5y: CAGR +41% / MDD -52% / monthly median +1.3%
     "avax_growth":  ("triple_long", "AVAX/USDT", "30m", 0.015, 5.0, False, False, False),
@@ -142,18 +149,21 @@ PRESETS = {
 SAFER_PRESETS = {"safer_growth", "safer_high_return",
                  "safer_inj_growth", "safer_inj_high_return",
                  "adaptive_inj_growth", "adaptive_inj_high_return",
-                 "adaptive_inj_bidir", "adaptive_inj_bidir_wf"}
+                 "adaptive_inj_bidir", "adaptive_inj_bidir_wf",
+                 "adaptive_bidir"}
 
 # Presets that use ML regime detection — block longs in BEAR.
 # Bidirectional presets ALSO block shorts in BULL (directional filter).
 ADAPTIVE_PRESETS = {"adaptive_inj_growth", "adaptive_inj_high_return",
-                    "adaptive_inj_bidir", "adaptive_inj_bidir_wf"}
+                    "adaptive_inj_bidir", "adaptive_inj_bidir_wf",
+                    "adaptive_bidir"}
 
 # Presets that apply the F&G extreme-zone filter on top of the bidir signal:
 #   - block longs when F&G >= 80 (extreme greed)
 #   - block shorts when F&G <= 20 (extreme fear)
 # 5y backtest on INJ 1h: same return as without, MDD improved ~6pp.
-FNG_EXTREME_PRESETS = {"adaptive_inj_bidir", "adaptive_inj_bidir_wf"}
+FNG_EXTREME_PRESETS = {"adaptive_inj_bidir", "adaptive_inj_bidir_wf",
+                       "adaptive_bidir"}
 
 # Presets that read dynamic (ema_fast, ema_slow, rsi_min) from params_file
 # (written by research/retune.py). Falls back to BotConfig defaults if the

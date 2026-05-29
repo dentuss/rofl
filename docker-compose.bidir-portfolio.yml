@@ -1,0 +1,112 @@
+# Multi-pair BIDIR portfolio — 5 bots in parallel, "inj_heavy" weighting.
+#
+# Each bot runs the production preset (triple_bidir + directional regime
+# filter + F&G extreme-zone filter + equity decay) on its own pair via the
+# SYMBOL override. Capital is split INJ 40 / SOL 20 / ADA 15 / ETH 15 / LINK 10.
+#
+# Run:
+#   docker compose -f docker-compose.bidir-portfolio.yml up -d --build
+#   docker compose -f docker-compose.bidir-portfolio.yml logs -f          # all
+#   docker compose -f docker-compose.bidir-portfolio.yml logs -f inj-bot  # one
+#   docker compose -f docker-compose.bidir-portfolio.yml down
+#
+# 4.6y backtest (common window, $100 total, funding modeled):
+#   single INJ:   CAGR +120%  MDD -27.6%  Sharpe 1.75  worst month -16.2%
+#   inj_heavy:    CAGR  +92%  MDD -18.2%  Sharpe 1.95  worst month  -6.6%
+# Diversification cuts MDD by ~9pp and worst-month by ~10pp at the cost of
+# ~23% of CAGR. Average pairwise monthly correlation is only 0.16 — the bidir
+# strategy decorrelates the pairs (one shorts a bear while another longs a bull).
+
+x-bot: &bot-defaults
+  build: .
+  image: rofl-bot:latest
+  restart: unless-stopped
+  environment: &env-defaults
+    MODE: ${MODE:-paper}
+    EXCHANGE: ${EXCHANGE:-bybit}
+    API_KEY: ${API_KEY:-}
+    API_SECRET: ${API_SECRET:-}
+    API_PASSPHRASE: ${API_PASSPHRASE:-}
+    POLL_SECONDS: ${POLL_SECONDS:-30}
+    STRATEGY_PRESET: adaptive_bidir          # symbol-agnostic bidir preset
+    TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  inj-bot:
+    <<: *bot-defaults
+    container_name: rofl-inj
+    environment:
+      <<: *env-defaults
+      SYMBOL: INJ/USDT
+      STARTING_EQUITY: ${INJ_EQUITY:-40}
+    volumes:
+      - inj_state:/app/state
+      - inj_logs:/app/logs
+      - shared_cache:/app/.cache
+
+  sol-bot:
+    <<: *bot-defaults
+    container_name: rofl-sol
+    environment:
+      <<: *env-defaults
+      SYMBOL: SOL/USDT
+      STARTING_EQUITY: ${SOL_EQUITY:-20}
+    volumes:
+      - sol_state:/app/state
+      - sol_logs:/app/logs
+      - shared_cache:/app/.cache
+
+  ada-bot:
+    <<: *bot-defaults
+    container_name: rofl-ada
+    environment:
+      <<: *env-defaults
+      SYMBOL: ADA/USDT
+      STARTING_EQUITY: ${ADA_EQUITY:-15}
+    volumes:
+      - ada_state:/app/state
+      - ada_logs:/app/logs
+      - shared_cache:/app/.cache
+
+  eth-bot:
+    <<: *bot-defaults
+    container_name: rofl-eth
+    environment:
+      <<: *env-defaults
+      SYMBOL: ETH/USDT
+      STARTING_EQUITY: ${ETH_EQUITY:-15}
+    volumes:
+      - eth_state:/app/state
+      - eth_logs:/app/logs
+      - shared_cache:/app/.cache
+
+  link-bot:
+    <<: *bot-defaults
+    container_name: rofl-link
+    environment:
+      <<: *env-defaults
+      SYMBOL: LINK/USDT
+      STARTING_EQUITY: ${LINK_EQUITY:-10}
+    volumes:
+      - link_state:/app/state
+      - link_logs:/app/logs
+      - shared_cache:/app/.cache
+
+volumes:
+  inj_state:
+  sol_state:
+  ada_state:
+  eth_state:
+  link_state:
+  inj_logs:
+  sol_logs:
+  ada_logs:
+  eth_logs:
+  link_logs:
+  shared_cache:
