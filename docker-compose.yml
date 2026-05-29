@@ -16,7 +16,7 @@ services:
     restart: unless-stopped
     environment:
       # ---- Strategy choice ----
-      STRATEGY_PRESET: ${STRATEGY_PRESET:-safer_inj_high_return}
+      STRATEGY_PRESET: ${STRATEGY_PRESET:-adaptive_inj_bidir}
       # ---- Mode ----
       MODE: ${MODE:-paper}            # 'paper' or 'live'
       STARTING_EQUITY: ${STARTING_EQUITY:-100}
