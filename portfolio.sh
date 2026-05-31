@@ -54,6 +54,46 @@ case "${1:-}" in
         echo "Portfolio split of ${TOTAL_EQUITY} total:"
         echo "  INJ  ${INJ_EQUITY}   SOL ${SOL_EQUITY}   ADA ${ADA_EQUITY}   ETH ${ETH_EQUITY}   LINK ${LINK_EQUITY}"
         ;;
+    status)
+        # Custom subcommand: dump per-bot equity/position by execing into each
+        # container. State files live inside Docker volumes, so the host's
+        # `python3 bot_status.py` can't see them.
+        total_eq=0
+        total_pnl=0
+        printf "%-6s%12s%12s%9s%12s  %s\n" "bot" "equity" "realized" "trades" "peak" "position"
+        printf -- "%.0s-" {1..100}; printf "\n"
+        for bot in inj sol ada eth link; do
+            line="$(docker exec "rofl-$bot" cat /app/state/bot_state.json 2>/dev/null \
+                | python3 -c '
+import json, sys, datetime
+d = json.load(sys.stdin)
+eq, pnl = d.get("equity",0), d.get("realised_pnl",0)
+n, peak = d.get("realised_trades",0), d.get("equity_peak",eq)
+pos = d.get("position")
+if pos:
+    side = "LONG" if pos["side"]==1 else "SHORT"
+    qty, ent = pos["qty"], pos["entry_px"]
+    sl, tp = pos["sl"], pos["tp"]
+    age_s = int(datetime.datetime.now(datetime.timezone.utc).timestamp() - pos.get("open_ts",0))
+    age_str = f"{age_s//3600}h{(age_s%3600)//60}m"
+    pos_s = f"{side} qty={qty:.4f} entry={ent:.4f} sl={sl:.4f} tp={tp:.4f} age={age_str}"
+else:
+    pos_s = "(flat)"
+print(f"{eq:.2f}|{pnl:.2f}|{n}|{peak:.2f}|{pos_s}")
+' 2>/dev/null)"
+            if [[ -z "$line" ]]; then
+                printf "%-6s%12s%12s%9s%12s  %s\n" "$bot" "-" "-" "-" "-" "container not running"
+                continue
+            fi
+            IFS='|' read -r eq pnl n peak pos <<< "$line"
+            total_eq=$(python3 -c "print($total_eq + $eq)")
+            total_pnl=$(python3 -c "print($total_pnl + $pnl)")
+            printf "%-6s%12.2f%+12.2f%9s%12.2f  %s\n" "$bot" "$eq" "$pnl" "$n" "$peak" "$pos"
+        done
+        printf -- "%.0s-" {1..100}; printf "\n"
+        printf "%-6s%12.2f%+12.2f\n" "TOTAL" "$total_eq" "$total_pnl"
+        exit 0
+        ;;
 esac
 
 exec docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
