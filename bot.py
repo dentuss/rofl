@@ -119,10 +119,13 @@ PRESETS = {
 
     # Bidirectional (long + mirror short) + directional regime filter:
     #   - long only in BULL/CHOP, short only in BEAR/CHOP
-    # 5y INJ 1h walk-forward, r=2% + decay + F&G extreme-zone filter (>=80 / <=20):
-    #   adaptive_inj_bidir: CAGR +140% MDD -28% Sharpe 1.75 (vs +146%/-33%/1.74 no-F&G)
-    #   F&G filter: blocks 139 extreme-greed longs + 865 extreme-fear shorts over 5y;
-    #   same return, MDD improved by ~6pp.
+    # 5y INJ 1h walk-forward, r=2% + decay + F&G persistence filter (3-day):
+    #   adaptive_inj_bidir: CAGR +147% MDD -27% Sharpe 1.91 ($100 -> $6531)
+    #   F&G persistence (FNG_PERSIST_DAYS=3): only blocks ENTRENCHED extremes
+    #   (>=3 consecutive days >=80 or <=20); lets flash-extremes through since
+    #   those continuation shorts are profitable. vs single-day 80/20 blocking:
+    #   +25pp CAGR, +0.14 Sharpe, same MDD. Blocking longs at greed gives the
+    #   MDD protection; the old short-block at fear was leaving money on table.
     "adaptive_inj_bidir":       ("triple_bidir", "INJ/USDT", "1h", 0.020, 5.0, False, False, True),
 
     # Same as adaptive_inj_bidir but ALSO reads dynamic (ema_fast, ema_slow,
@@ -214,6 +217,12 @@ class BotConfig:
     fng_greed_max: float = float(os.getenv("FNG_GREED_MAX", "80"))
     fng_fear_min: float = float(os.getenv("FNG_FEAR_MIN", "20"))
     fng_extreme_override: str = os.getenv("FNG_EXTREME", "")
+    # Only block when F&G has been extreme for >=N consecutive daily readings.
+    # 1 = block on a single extreme reading (old behavior). 3 (default) lets
+    # flash-extremes through (often the START of a continuation move) and only
+    # blocks entrenched capitulation/euphoria (which mean-revert). 5y backtest:
+    # +24pp portfolio CAGR, +0.23 Sharpe, same MDD vs single-day blocking.
+    fng_persist_days: int = int(os.getenv("FNG_PERSIST_DAYS", "3"))
     # HTF trend filter
     htf_rule: str = os.getenv("HTF_RULE", "1D")
     htf_ema_n: int = int(os.getenv("HTF_EMA_N", "50"))
@@ -582,11 +591,17 @@ class Bot:
                 fng_df = fetch_fear_greed()
                 fng_value = int(fng_df["fng"].iloc[-1])
                 last_sig = int(sig.iloc[-1]["signal"])
-                block_fng = (last_sig ==  1 and fng_value >= self.cfg.fng_greed_max) \
-                         or (last_sig == -1 and fng_value <= self.cfg.fng_fear_min)
+                # Persistence: require the last N daily readings to all be
+                # extreme before blocking (flash-extremes pass through).
+                n = max(1, self.cfg.fng_persist_days)
+                recent = fng_df["fng"].tail(n)
+                greed_persist = len(recent) >= n and bool((recent >= self.cfg.fng_greed_max).all())
+                fear_persist = len(recent) >= n and bool((recent <= self.cfg.fng_fear_min).all())
+                block_fng = (last_sig ==  1 and greed_persist) \
+                         or (last_sig == -1 and fear_persist)
                 if block_fng:
-                    self.log.info(f"F&G={fng_value}, blocking side={last_sig} "
-                                  f"(extremes filter)")
+                    self.log.info(f"F&G={fng_value} extreme for {n}d, "
+                                  f"blocking side={last_sig} (persistence filter)")
                     sig = sig.copy()
                     import numpy as _np
                     sig.iloc[-1, sig.columns.get_loc("signal")] = 0

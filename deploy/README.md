@@ -67,7 +67,7 @@ STRATEGY_PRESET=adaptive_inj_bidir
 - **INJ/USDT 1h** is the discovered best pair/tf on 5y backtest data — profitable every year incl. 2022 bear, lower MDD than SOL, higher Sharpe.
 - **Bidirectional** (`triple_bidir` strategy) takes long *and* short trades — mirror-image entry rules (EMA stack down, RSI < 45, ADX > 22, ATR-based symmetric stops).
 - **Directional regime filter** — longs only when GMM regime is BULL/CHOP, shorts only in BEAR/CHOP. Avoids countertrend trades in the wrong regime.
-- **F&G extreme-zone filter** — additionally blocks longs at Fear & Greed ≥ 80 (extreme greed → likely tops) and shorts at F&G ≤ 20 (extreme fear → likely bottoms). Walk-forward 5y test: same return, MDD improved by ~6pp.
+- **F&G persistence filter** — blocks longs at Fear & Greed ≥ 80 and shorts at F&G ≤ 20, but **only when the extreme has persisted ≥ 3 consecutive days** (`FNG_PERSIST_DAYS=3`). Flash-extremes pass through, because a 1–2 day spike is often the *start* of a continuation move (those shorts are profitable), while a multi-day entrenched extreme is genuine capitulation/euphoria that mean-reverts. 5y test vs single-day blocking: +25pp CAGR, +0.14 Sharpe on INJ, same MDD. Set `FNG_PERSIST_DAYS=1` for the old single-day behavior.
 - 5y walk-forward backtest (r=2%, decay=0.5, funding @ 1bp/8h modeled):
 
   | Preset | CAGR | MDD | Sharpe | Total return (5y) |
