@@ -29,10 +29,11 @@ from core.strategies import triple_confirm_bidir
 
 CURRENT = ["INJ-USDT", "SOL-USDT", "ADA-USDT", "ETH-USDT", "LINK-USDT"]
 CANDIDATES = [
-    "AVAX-USDT", "DOT-USDT", "ATOM-USDT", "NEAR-USDT", "MATIC-USDT", "FTM-USDT",
-    "RUNE-USDT", "AAVE-USDT", "UNI-USDT", "FIL-USDT", "ICP-USDT", "ALGO-USDT",
+    "AVAX-USDT", "DOT-USDT", "ATOM-USDT", "NEAR-USDT", "RUNE-USDT",
+    "AAVE-USDT", "UNI-USDT", "FIL-USDT", "ICP-USDT", "ALGO-USDT",
     "XLM-USDT", "APT-USDT", "ARB-USDT", "OP-USDT", "DOGE-USDT", "DYDX-USDT",
     "GRT-USDT", "SAND-USDT", "XRP-USDT", "BNB-USDT", "ETC-USDT", "EGLD-USDT",
+    "MANA-USDT", "AXS-USDT", "THETA-USDT", "HBAR-USDT", "VET-USDT", "BCH-USDT",
 ]
 MIN_DAYS = 900  # ~2.5y minimum so the regime detector + decay have room
 
