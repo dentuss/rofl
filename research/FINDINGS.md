@@ -30,6 +30,22 @@ modeled. Scripts that produced each result are named.
 | **Chop filter (CI / efficiency ratio)** | hurts winners (INJ $3780→$1032), no weak-pair benefit; ADX>22 already filters chop | test_chop_health.py |
 | **Price-based health filter (90d ER)** | ER structurally ~0 at long lookback, can't separate dead from healthy — blocks ~everything | test_chop_health.py |
 | **Strategy-health gate (trailing equity)** | every threshold costs winner return (≥17%) for marginal weak-pair help; decay already handles drawdown | test_health_gate.py |
+| **lean_sol_ada weighting** | WORST scheme of 6 (Sharpe 1.99 vs 2.16 inj_heavy); concentrating in recent winners underperforms | portfolio_construction.py |
+| **max-Sharpe weight optimization** | in-sample optimum (2.13) didn't even beat the inj_heavy heuristic (2.16) — weight tuning has no edge | portfolio_construction.py |
+| **dynamic rebalance (trailing-3mo Sharpe)** | catastrophic performance-chasing: +4% vs +2358% static equal over 4.6y | portfolio_construction.py |
+
+## Universe + portfolio construction (research/expand_universe.py, portfolio_construction.py)
+
+- **Strategy is NOT INJ-specific.** Of 33 pairs swept, 20 clear Sharpe ≥ 1.1;
+  RUNE/AAVE/DOGE/AVAX/GRT/NEAR all rival or beat 4 of the current 5.
+- **Diversification depth:** best-N equal-weight Sharpe peaks at N≈7 (2.44) then
+  slowly dilutes; tail keeps improving with N (worst month −16%→−9%, MDD −24%→−18%).
+  Sweet spot ≈ 7-8 pre-screened pairs, equal-weight.
+- **Pair performance is period-dependent** — ETH Sharpe 1.31 over 8.7y but 0.78 on
+  the recent 4.6y window; FIL 1.69 full-history vs 0.74 recent. So "pick the top-N
+  Sharpe" is overfitting; the robust play is a broad equal-weight basket.
+- **Weighting:** current inj_heavy is near-optimal on the 5; equal-weight gives the
+  best worst-month; leaning into recent winners (SOL/ADA) is the worst.
 
 ## Meta-conclusion
 
