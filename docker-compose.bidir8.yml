@@ -1,0 +1,130 @@
+# 8-pair BIDIR portfolio — equal weight, narrative-diversified.
+#
+# Selection rationale (research/expand_universe.py + portfolio_construction.py):
+# 20 of 33 swept pairs clear Sharpe >= 1.1 with the production strategy, and
+# best-N analysis peaks around 7-8 equal-weight pairs (Sharpe ~2.4, worst
+# month ~-11% vs -16% on 3 pairs). Pairs chosen for narrative diversity, not
+# top-N Sharpe (per-window rankings don't persist):
+#   L1s:        INJ, AVAX, NEAR
+#   DeFi/infra: AAVE, GRT, RUNE
+#   Meme:       DOGE
+#   L1 value:   ADA
+# Equal weight 12.5% each (weight optimization adds nothing — see FINDINGS).
+#
+# Run via the wrapper (computes the split from TOTAL_EQUITY):
+#   PORTFOLIO=8 sudo ./portfolio.sh up -d --build
+#   PORTFOLIO=8 sudo ./portfolio.sh status
+# or raw compose:
+#   docker compose -f docker-compose.bidir8.yml --env-file .env up -d --build
+
+x-bot: &bot-defaults
+  build: .
+  image: rofl-bot:latest
+  restart: unless-stopped
+  environment: &env-defaults
+    MODE: ${MODE:-paper}
+    EXCHANGE: ${EXCHANGE:-bybit}
+    API_KEY: ${API_KEY:-}
+    API_SECRET: ${API_SECRET:-}
+    API_PASSPHRASE: ${API_PASSPHRASE:-}
+    POLL_SECONDS: ${POLL_SECONDS:-30}
+    STRATEGY_PRESET: adaptive_bidir
+    TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  inj-bot:
+    <<: *bot-defaults
+    container_name: rofl-inj
+    environment:
+      <<: *env-defaults
+      SYMBOL: INJ/USDT
+      STARTING_EQUITY: ${INJ_EQUITY:-12.5}
+    volumes: [inj_state:/app/state, inj_logs:/app/logs, shared_cache:/app/.cache]
+
+  avax-bot:
+    <<: *bot-defaults
+    container_name: rofl-avax
+    environment:
+      <<: *env-defaults
+      SYMBOL: AVAX/USDT
+      STARTING_EQUITY: ${AVAX_EQUITY:-12.5}
+    volumes: [avax_state:/app/state, avax_logs:/app/logs, shared_cache:/app/.cache]
+
+  near-bot:
+    <<: *bot-defaults
+    container_name: rofl-near
+    environment:
+      <<: *env-defaults
+      SYMBOL: NEAR/USDT
+      STARTING_EQUITY: ${NEAR_EQUITY:-12.5}
+    volumes: [near_state:/app/state, near_logs:/app/logs, shared_cache:/app/.cache]
+
+  aave-bot:
+    <<: *bot-defaults
+    container_name: rofl-aave
+    environment:
+      <<: *env-defaults
+      SYMBOL: AAVE/USDT
+      STARTING_EQUITY: ${AAVE_EQUITY:-12.5}
+    volumes: [aave_state:/app/state, aave_logs:/app/logs, shared_cache:/app/.cache]
+
+  grt-bot:
+    <<: *bot-defaults
+    container_name: rofl-grt
+    environment:
+      <<: *env-defaults
+      SYMBOL: GRT/USDT
+      STARTING_EQUITY: ${GRT_EQUITY:-12.5}
+    volumes: [grt_state:/app/state, grt_logs:/app/logs, shared_cache:/app/.cache]
+
+  rune-bot:
+    <<: *bot-defaults
+    container_name: rofl-rune
+    environment:
+      <<: *env-defaults
+      SYMBOL: RUNE/USDT
+      STARTING_EQUITY: ${RUNE_EQUITY:-12.5}
+    volumes: [rune_state:/app/state, rune_logs:/app/logs, shared_cache:/app/.cache]
+
+  doge-bot:
+    <<: *bot-defaults
+    container_name: rofl-doge
+    environment:
+      <<: *env-defaults
+      SYMBOL: DOGE/USDT
+      STARTING_EQUITY: ${DOGE_EQUITY:-12.5}
+    volumes: [doge_state:/app/state, doge_logs:/app/logs, shared_cache:/app/.cache]
+
+  ada-bot:
+    <<: *bot-defaults
+    container_name: rofl-ada
+    environment:
+      <<: *env-defaults
+      SYMBOL: ADA/USDT
+      STARTING_EQUITY: ${ADA_EQUITY:-12.5}
+    volumes: [ada_state:/app/state, ada_logs:/app/logs, shared_cache:/app/.cache]
+
+volumes:
+  inj_state:
+  avax_state:
+  near_state:
+  aave_state:
+  grt_state:
+  rune_state:
+  doge_state:
+  ada_state:
+  inj_logs:
+  avax_logs:
+  near_logs:
+  aave_logs:
+  grt_logs:
+  rune_logs:
+  doge_logs:
+  ada_logs:
+  shared_cache:

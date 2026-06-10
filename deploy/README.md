@@ -130,12 +130,25 @@ Trades ~23% of CAGR for a drawdown a human can actually hold through. Two ways t
 ```bash
 cd ~/rofl
 # put TOTAL_EQUITY=100 in .env (or pass it inline), then:
-sudo ./portfolio.sh up -d --build      # splits TOTAL_EQUITY 40/20/15/15/10
-sudo ./portfolio.sh logs -f            # tail all 5 bots
-sudo ./portfolio.sh ps                 # status
+sudo ./portfolio.sh up -d --build      # 5-pair inj_heavy (40/20/15/15/10)
+sudo ./portfolio.sh logs -f            # tail all bots
+sudo ./portfolio.sh status             # per-bot equity/position + total
 sudo ./portfolio.sh down               # stop (keeps equity/state)
 sudo ./portfolio.sh down -v            # stop AND reset equity to the split
 ```
+
+**8-pair equal-weight variant** (`PORTFOLIO=8`, or put `PORTFOLIO=8` in `.env`):
+```bash
+PORTFOLIO=8 sudo -E ./portfolio.sh up -d --build
+PORTFOLIO=8 sudo -E ./portfolio.sh status
+```
+Runs INJ, AVAX, NEAR, AAVE, GRT, RUNE, DOGE, ADA at 12.5% each — the
+diversification sweet spot from the 33-pair universe sweep (best-N Sharpe
+peaks at ~7-8 equal-weight pairs: ~2.4 vs 2.16 for the 5-pair, worst month
+~−11%, MDD ~−19%). Pairs were chosen for narrative diversity (L1s / DeFi /
+meme), not top-N Sharpe, because per-window rankings don't persist.
+**Don't run both portfolios simultaneously** — they share container names
+for the overlapping pairs (INJ, ADA), and 13 bots would exhaust a t4g.small.
 You only set **`TOTAL_EQUITY`**; the wrapper computes each bot's slice
 (`INJ_EQUITY`…`LINK_EQUITY`) from the weights and passes them to compose.
 The weights themselves are overridable (`INJ_WEIGHT` etc.) but default to the

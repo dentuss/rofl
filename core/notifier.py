@@ -61,23 +61,37 @@ class Notifier:
             gap = time.time() - self._last_send
             if gap < self._min_interval:
                 time.sleep(self._min_interval - gap)
-            try:
-                r = requests.post(
-                    f"https://api.telegram.org/bot{self.token}/sendMessage",
-                    json={
-                        "chat_id": self.chat_id,
-                        "text": text,
-                        "parse_mode": "Markdown",
-                        "disable_notification": silent,
-                        "disable_web_page_preview": True,
-                    },
-                    timeout=5,
-                )
-                self._last_send = time.time()
-                if r.status_code != 200:
+            # Retry on 429: with several portfolio bots sharing one chat,
+            # simultaneous sends (e.g. a regime flip hits all pairs at once)
+            # can trip Telegram's per-chat limit. Honor retry_after.
+            for attempt in range(3):
+                try:
+                    r = requests.post(
+                        f"https://api.telegram.org/bot{self.token}/sendMessage",
+                        json={
+                            "chat_id": self.chat_id,
+                            "text": text,
+                            "parse_mode": "Markdown",
+                            "disable_notification": silent,
+                            "disable_web_page_preview": True,
+                        },
+                        timeout=5,
+                    )
+                    self._last_send = time.time()
+                    if r.status_code == 200:
+                        return
+                    if r.status_code == 429:
+                        try:
+                            wait = float(r.json()["parameters"]["retry_after"])
+                        except Exception:
+                            wait = 2.0 * (attempt + 1)
+                        time.sleep(min(wait, 15))
+                        continue
                     self.log.warning(f"telegram send {r.status_code}: {r.text[:120]}")
-            except Exception as e:
-                self.log.warning(f"telegram error: {e}")
+                    return
+                except Exception as e:
+                    self.log.warning(f"telegram error: {e}")
+                    return
 
     def _tag(self) -> str:
         m = "🟢 LIVE" if self.mode == "live" else "📝 PAPER"
