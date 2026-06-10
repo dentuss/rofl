@@ -1,30 +1,33 @@
 #!/bin/bash
-# Docker wrapper for the 5-pair bidir portfolio that splits ONE total equity
-# across the bots by weight, so you only set TOTAL_EQUITY (not 5 vars).
+# Docker wrapper for the bidir portfolios. Splits ONE total equity across the
+# bots by weight, so you only set TOTAL_EQUITY (not per-pair vars).
 #
-# Weights default to the validated "inj_heavy" split (40/20/15/15/10).
-# Set TOTAL_EQUITY in .env (or the environment); everything else passes
-# through to `docker compose`.
+# Two portfolios are available:
+#   PORTFOLIO=5 (default)  inj_heavy:   INJ 40 / SOL 20 / ADA 15 / ETH 15 / LINK 10
+#   PORTFOLIO=8            equal-weight: INJ AVAX NEAR AAVE GRT RUNE DOGE ADA (12.5 each)
 #
 # Usage:
-#   sudo ./portfolio.sh up -d --build      # start (computes split from TOTAL_EQUITY)
-#   sudo ./portfolio.sh logs -f            # tail all 5 bots
-#   sudo ./portfolio.sh ps                 # status
-#   sudo ./portfolio.sh down               # stop (keeps state)
-#   sudo ./portfolio.sh down -v            # stop AND reset equity/state
+#   sudo ./portfolio.sh up -d --build              # start 5-pair (computes split)
+#   PORTFOLIO=8 sudo -E ./portfolio.sh up -d --build   # start 8-pair
+#   sudo ./portfolio.sh status                     # per-bot equity/position
+#   sudo ./portfolio.sh logs -f                    # tail all bots
+#   sudo ./portfolio.sh down                       # stop (keeps state)
+#   sudo ./portfolio.sh down -v                    # stop AND reset equity/state
 #
 #   TOTAL_EQUITY=1000 sudo -E ./portfolio.sh up -d --build
 #
-# Note: changing TOTAL_EQUITY only re-initializes equity on a FRESH state.
-# To apply a new total to running bots, use `down -v` first (wipes state).
+# Notes:
+#   - changing TOTAL_EQUITY only re-initializes equity on a FRESH state; use
+#     `down -v` first to apply a new total to running bots.
+#   - PORTFOLIO can also be set in .env. Don't run both portfolios at once:
+#     they share container names for overlapping pairs (INJ, ADA).
 
 set -euo pipefail
 cd "$(dirname "$0")"
 
-COMPOSE_FILE="docker-compose.bidir-portfolio.yml"
 ENV_FILE=".env"
 
-# Read TOTAL_EQUITY + weights from environment, falling back to .env, then defaults.
+# Read a var from environment, falling back to .env, then a default.
 read_env() {  # read_env KEY DEFAULT
     local key="$1" def="$2" val=""
     val="${!key:-}"
@@ -34,25 +37,44 @@ read_env() {  # read_env KEY DEFAULT
     echo "${val:-$def}"
 }
 
+PORTFOLIO="$(read_env PORTFOLIO 5)"
 TOTAL_EQUITY="$(read_env TOTAL_EQUITY 100)"
-INJ_WEIGHT="$(read_env INJ_WEIGHT 0.40)"
-SOL_WEIGHT="$(read_env SOL_WEIGHT 0.20)"
-ADA_WEIGHT="$(read_env ADA_WEIGHT 0.15)"
-ETH_WEIGHT="$(read_env ETH_WEIGHT 0.15)"
-LINK_WEIGHT="$(read_env LINK_WEIGHT 0.10)"
+
+if [[ "$PORTFOLIO" == "8" ]]; then
+    COMPOSE_FILE="docker-compose.bidir8.yml"
+    BOTS=(inj avax near aave grt rune doge ada)
+    declare -A WEIGHTS=(
+        [inj]="$(read_env INJ_WEIGHT 0.125)"   [avax]="$(read_env AVAX_WEIGHT 0.125)"
+        [near]="$(read_env NEAR_WEIGHT 0.125)" [aave]="$(read_env AAVE_WEIGHT 0.125)"
+        [grt]="$(read_env GRT_WEIGHT 0.125)"   [rune]="$(read_env RUNE_WEIGHT 0.125)"
+        [doge]="$(read_env DOGE_WEIGHT 0.125)" [ada]="$(read_env ADA_WEIGHT 0.125)"
+    )
+else
+    COMPOSE_FILE="docker-compose.bidir-portfolio.yml"
+    BOTS=(inj sol ada eth link)
+    declare -A WEIGHTS=(
+        [inj]="$(read_env INJ_WEIGHT 0.40)" [sol]="$(read_env SOL_WEIGHT 0.20)"
+        [ada]="$(read_env ADA_WEIGHT 0.15)" [eth]="$(read_env ETH_WEIGHT 0.15)"
+        [link]="$(read_env LINK_WEIGHT 0.10)"
+    )
+fi
 
 calc() { python3 -c "print(round($1 * $2, 2))"; }
-export INJ_EQUITY="$(calc "$TOTAL_EQUITY" "$INJ_WEIGHT")"
-export SOL_EQUITY="$(calc "$TOTAL_EQUITY" "$SOL_WEIGHT")"
-export ADA_EQUITY="$(calc "$TOTAL_EQUITY" "$ADA_WEIGHT")"
-export ETH_EQUITY="$(calc "$TOTAL_EQUITY" "$ETH_WEIGHT")"
-export LINK_EQUITY="$(calc "$TOTAL_EQUITY" "$LINK_WEIGHT")"
+for bot in "${BOTS[@]}"; do
+    var="$(echo "$bot" | tr '[:lower:]' '[:upper:]')_EQUITY"
+    export "$var"="$(calc "$TOTAL_EQUITY" "${WEIGHTS[$bot]}")"
+done
 
 # Only print the split for lifecycle commands that start bots.
 case "${1:-}" in
     up|create|run)
-        echo "Portfolio split of ${TOTAL_EQUITY} total:"
-        echo "  INJ  ${INJ_EQUITY}   SOL ${SOL_EQUITY}   ADA ${ADA_EQUITY}   ETH ${ETH_EQUITY}   LINK ${LINK_EQUITY}"
+        echo "Portfolio ${PORTFOLIO}-pair split of ${TOTAL_EQUITY} total:"
+        line="  "
+        for bot in "${BOTS[@]}"; do
+            var="$(echo "$bot" | tr '[:lower:]' '[:upper:]')_EQUITY"
+            line+="$(echo "$bot" | tr '[:lower:]' '[:upper:]') ${!var}   "
+        done
+        echo "$line"
         ;;
     status)
         # Custom subcommand: dump per-bot equity/position by execing into each
@@ -62,7 +84,7 @@ case "${1:-}" in
         total_pnl=0
         printf "%-6s%12s%12s%9s%12s  %s\n" "bot" "equity" "realized" "trades" "peak" "position"
         printf -- "%.0s-" {1..100}; printf "\n"
-        for bot in inj sol ada eth link; do
+        for bot in "${BOTS[@]}"; do
             line="$(docker exec "rofl-$bot" cat /app/state/bot_state.json 2>/dev/null \
                 | python3 -c '
 import json, sys, datetime

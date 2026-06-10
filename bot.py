@@ -47,6 +47,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 import signal
 import sys
 import time
@@ -737,7 +738,19 @@ class Bot:
         if qty <= 0 or notional < 5:  # min order size sanity
             self.log.info(f"skipping tiny order qty={qty:.6f} notional={notional:.2f}")
             return
-        order = self.ex.market_buy(qty) if side == 1 else self.ex.market_sell(qty)
+        # SL/TP geometry sanity — a malformed pair would close on the next bar.
+        if (side == 1 and not (sl < entry_px < tp)) or \
+           (side == -1 and not (tp < entry_px < sl)):
+            self.log.warning(f"malformed SL/TP for side={side}: "
+                             f"sl={sl:.4f} entry≈{entry_px:.4f} tp={tp:.4f} — skipping entry")
+            return
+        try:
+            order = self.ex.market_buy(qty) if side == 1 else self.ex.market_sell(qty)
+        except Exception as e:
+            self.log.error(f"entry order FAILED: {e} — no position opened")
+            self.events.error(message=f"entry order failed: {e}",
+                              exception_type=type(e).__name__)
+            return
         fill_px = float(order.get("price") or entry_px)
         self.state.position = Position(
             side=side, qty=qty, entry_px=fill_px,
@@ -767,14 +780,25 @@ class Bot:
         pos = self.state.position
         if pos is None:
             return
-        order = self.ex.market_sell(pos.qty) if pos.side == 1 else self.ex.market_buy(pos.qty)
+        try:
+            order = self.ex.market_sell(pos.qty) if pos.side == 1 else self.ex.market_buy(pos.qty)
+        except Exception as e:
+            # Keep the position; we'll retry on the next tick rather than
+            # silently dropping a live position from our books.
+            self.log.error(f"close order FAILED ({reason}): {e} — retrying next tick")
+            self.events.error(message=f"close order failed: {e}",
+                              exception_type=type(e).__name__)
+            return
         fill_px = float(order.get("price") or exit_px_hint)
-        # Use the SL/TP price (not market) when we know they triggered, since
-        # that matches the backtest convention and is realistic for stop orders.
-        if reason == "sl":
-            fill_px = pos.sl
-        elif reason == "tp":
-            fill_px = pos.tp
+        # Paper mode: use the SL/TP price when they triggered — matches the
+        # backtest convention (a resting stop order fills at its price).
+        # Live mode: keep the ACTUAL fill. Overwriting a real fill with the
+        # theoretical stop price would drift our equity from the exchange's.
+        if self.cfg.mode != "live":
+            if reason == "sl":
+                fill_px = pos.sl
+            elif reason == "tp":
+                fill_px = pos.tp
         gross = (fill_px - pos.entry_px) * pos.qty * pos.side
         # Approx round-trip fee 0.06% per side on notional
         fees = (pos.notional + fill_px * pos.qty) * 0.0006
@@ -783,6 +807,10 @@ class Bot:
         self.state.equity += pnl
         self.state.realised_trades += 1
         self.state.realised_pnl += pnl
+        # Persist immediately: a crash after the fill but before the end-of-tick
+        # save must not resurrect an already-closed position on restart.
+        self.state.position = None
+        self.state.save(self.cfg.state_file)
         self.log.info(
             f"CLOSE {('LONG' if pos.side == 1 else 'SHORT')} {pos.qty:.6f} @ {fill_px:.4f} "
             f"reason={reason} pnl={pnl:.3f} equity={self.state.equity:.2f}"
@@ -800,8 +828,6 @@ class Bot:
                                       equity=self.state.equity, pct=pct)
         except Exception as e:
             self.log.warning(f"notifier trade_close failed: {e}")
-        self.state.position = None
-        self.state.save(self.cfg.state_file)
 
     # --- main loop ----------------------------------------------------------
     def _maybe_emit_daily_summary(self) -> None:
@@ -837,13 +863,38 @@ class Bot:
             self.log.warning(f"notifier daily_summary failed: {e}")
         self._last_daily_summary_day = cur_day
 
+    def _fetch_bars_for_signal(self) -> pd.DataFrame:
+        """Bars for signal computation.
+
+        Adaptive presets need ~1y of history for the regime GMM to fit the way
+        the backtest fit it (walk-forward trained on 365d + 30d feature
+        warmup). ccxt's fetch_ohlcv caps at ~1000 bars per call (= 41 days on
+        1h), which starves the GMM and yields regime labels that differ from
+        the validated backtest. So: pull deep history through the cached
+        KuCoin path (shared 1h-TTL cache across all portfolio bots) and splice
+        the fresh ccxt tail on top. Signals only act on closed bars, so a
+        <=1h-stale deep section is exact for a 1h-bar strategy.
+        """
+        recent = self.ex.fetch_recent(n=300)
+        if not self.cfg.use_adaptive_regime:
+            return recent
+        try:
+            from core.data import fetch_ohlcv
+            sym = self.cfg.symbol.replace("/", "-").replace(":USDT", "")
+            deep = fetch_ohlcv(sym, self.cfg.timeframe, days=400, use_cache=True)
+            df = pd.concat([deep, recent])
+            df = df[~df.index.duplicated(keep="last")].sort_index()
+            return df
+        except Exception as e:
+            self.log.warning(f"deep history fetch failed ({e}); "
+                             f"regime fit degraded to {len(recent)} bars")
+            return recent
+
     def tick(self) -> None:
         # Daily summary check (before bar processing)
         self._maybe_emit_daily_summary()
 
-        # Adaptive regime needs ~1y of history for the GMM to fit well
-        n_bars = 1200 if self.cfg.use_adaptive_regime else 300
-        df = self.ex.fetch_recent(n=n_bars)
+        df = self._fetch_bars_for_signal()
         warmup = max(self.cfg.entry_n, self.cfg.adx_n, self.cfg.atr_n) + 5
         if len(df) < warmup:
             self.log.warning(f"not enough bars: {len(df)}")
@@ -928,7 +979,9 @@ class Bot:
                     self.notifier.error(f"tick error: {type(e).__name__}: {e}")
                 except Exception:
                     pass
-            time.sleep(self.cfg.poll_seconds)
+            # Jitter de-synchronizes the portfolio bots (5+ on one IP) so they
+            # don't all hit the exchange API in the same instant.
+            time.sleep(self.cfg.poll_seconds + random.uniform(0, 5))
         # Graceful: do not auto-close any position
         self.log.info(f"exiting | trades={self.state.realised_trades} "
                       f"pnl={self.state.realised_pnl:.2f} equity={self.state.equity:.2f}")
