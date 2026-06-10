@@ -82,9 +82,10 @@ case "${1:-}" in
         # `python3 bot_status.py` can't see them.
         total_eq=0
         total_pnl=0
-        printf "%-6s%12s%12s%9s%12s  %s\n" "bot" "equity" "realized" "trades" "peak" "position"
-        printf -- "%.0s-" {1..100}; printf "\n"
+        printf "%-6s%-9s%12s%12s%9s%12s  %s\n" "bot" "health" "equity" "realized" "trades" "peak" "position"
+        printf -- "%.0s-" {1..108}; printf "\n"
         for bot in "${BOTS[@]}"; do
+            health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}' "rofl-$bot" 2>/dev/null || echo "?")"
             line="$(docker exec "rofl-$bot" cat /app/state/bot_state.json 2>/dev/null \
                 | python3 -c '
 import json, sys, datetime
@@ -104,16 +105,41 @@ else:
 print(f"{eq:.2f}|{pnl:.2f}|{n}|{peak:.2f}|{pos_s}")
 ' 2>/dev/null)"
             if [[ -z "$line" ]]; then
-                printf "%-6s%12s%12s%9s%12s  %s\n" "$bot" "-" "-" "-" "-" "container not running"
+                printf "%-6s%-9s%12s%12s%9s%12s  %s\n" "$bot" "$health" "-" "-" "-" "-" "container not running"
                 continue
             fi
             IFS='|' read -r eq pnl n peak pos <<< "$line"
             total_eq=$(python3 -c "print($total_eq + $eq)")
             total_pnl=$(python3 -c "print($total_pnl + $pnl)")
-            printf "%-6s%12.2f%+12.2f%9s%12.2f  %s\n" "$bot" "$eq" "$pnl" "$n" "$peak" "$pos"
+            printf "%-6s%-9s%12.2f%+12.2f%9s%12.2f  %s\n" "$bot" "$health" "$eq" "$pnl" "$n" "$peak" "$pos"
         done
-        printf -- "%.0s-" {1..100}; printf "\n"
-        printf "%-6s%12.2f%+12.2f\n" "TOTAL" "$total_eq" "$total_pnl"
+        printf -- "%.0s-" {1..108}; printf "\n"
+        printf "%-6s%-9s%12.2f%+12.2f\n" "TOTAL" "" "$total_eq" "$total_pnl"
+        exit 0
+        ;;
+    archive)
+        # Copy each bot's state + log + event log out of its docker volume into
+        # a timestamped local dir, then build a markdown summary + trades CSV.
+        # Safe to run while bots are live (cp is non-blocking, brief snapshot).
+        ts="$(date -u +%Y-%m-%d_%H%M%S)"
+        out="archives/run_${PORTFOLIO}pair_${ts}"
+        mkdir -p "$out"
+        echo "Archiving ${PORTFOLIO}-pair portfolio to $out ..."
+        for bot in "${BOTS[@]}"; do
+            mkdir -p "$out/$bot"
+            # Skip silently if the container isn't running
+            if ! docker inspect --format '{{.State.Running}}' "rofl-$bot" 2>/dev/null | grep -q true; then
+                echo "  $bot: container not running, skipped"
+                continue
+            fi
+            docker cp "rofl-$bot:/app/state/." "$out/$bot/" 2>/dev/null || true
+            docker cp "rofl-$bot:/app/logs/." "$out/$bot/" 2>/dev/null || true
+            echo "  $bot: copied"
+        done
+        python3 research/build_archive.py "$out"
+        echo
+        echo "Archive ready: $out"
+        echo "  scp -r ec2:~/rofl/$out ./   # to copy to your laptop"
         exit 0
         ;;
 esac

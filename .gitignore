@@ -9,3 +9,4 @@ state/
 .env
 .venv/
 venv/
+archives/
