@@ -21,6 +21,12 @@ x-bot: &bot-defaults
   build: .
   image: rofl-bot:latest
   restart: unless-stopped
+  healthcheck:
+    test: ["CMD-SHELL", "[ $(($(date +%s) - $(stat -c %Y /app/state/heartbeat 2>/dev/null || echo 0))) -lt 300 ]"]
+    interval: 60s
+    timeout: 5s
+    retries: 3
+    start_period: 180s
   environment: &env-defaults
     MODE: ${MODE:-paper}
     EXCHANGE: ${EXCHANGE:-bybit}

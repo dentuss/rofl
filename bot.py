@@ -51,7 +51,7 @@ import random
 import signal
 import sys
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -375,7 +375,9 @@ class State:
         )
 
     def save(self, path: str) -> None:
-        Path(path).write_text(self.to_json())
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(self.to_json())
 
 
 # ----------------------------- Logging --------------------------------------
@@ -446,6 +448,50 @@ class Exchange:
                 if exch_name == "bybit":
                     params["options"] = {"defaultType": "linear"}
                 self._ccxt = klass({k: v for k, v in params.items() if v})
+        self._market: dict | None = None
+
+    # ---- live-mode order helpers ---------------------------------------
+    def _load_market(self) -> dict | None:
+        """Cache the exchange's market metadata for our symbol (precision,
+        min amount, min cost). Returns None on paper or if unavailable."""
+        if self._market is not None or self.paper or self._ccxt is None:
+            return self._market
+        try:
+            if not getattr(self._ccxt, "markets", None):
+                self._ccxt.load_markets()
+            self._market = self._ccxt.market(self.cfg.symbol)
+        except Exception as e:
+            self.log.warning(f"load_markets failed ({e}); orders will use raw qty")
+            self._market = {}
+        return self._market
+
+    def normalize_order(self, qty: float, entry_px: float) -> tuple[float, str | None]:
+        """Round qty to the exchange's amount precision and validate
+        min-amount + min-cost. Returns (rounded_qty, reject_reason_or_None).
+        Paper mode: pass-through."""
+        if self.paper or self._ccxt is None:
+            return qty, None
+        m = self._load_market() or {}
+        try:
+            qty = float(self._ccxt.amount_to_precision(self.cfg.symbol, qty))
+        except Exception:
+            pass
+        limits = m.get("limits") or {}
+        min_amount = (limits.get("amount") or {}).get("min")
+        min_cost = (limits.get("cost") or {}).get("min")
+        if min_amount and qty < min_amount:
+            return qty, f"qty {qty} < exchange min amount {min_amount}"
+        if min_cost and (qty * entry_px) < min_cost:
+            return qty, f"notional {qty*entry_px:.4f} < exchange min cost {min_cost}"
+        return qty, None
+
+    def _round_price(self, p: float) -> float:
+        if self.paper or self._ccxt is None:
+            return p
+        try:
+            return float(self._ccxt.price_to_precision(self.cfg.symbol, p))
+        except Exception:
+            return p
 
     def fetch_recent(self, n: int = 250) -> pd.DataFrame:
         """Fetch last n closed bars (skips current forming bar in caller)."""
@@ -480,19 +526,55 @@ class Exchange:
                 self.log.warning(f"ccxt fetch_ticker failed ({e}); using last close")
         return float(self.fetch_recent(1)["close"].iloc[-1])
 
-    def market_buy(self, qty: float) -> dict:
-        if self.paper:
-            px = self.fetch_price()
-            return {"id": f"paper-{int(time.time())}", "price": px, "amount": qty}
-        order = self._ccxt.create_market_buy_order(self.cfg.symbol, qty)
-        return order
+    def _attached_sltp_params(self, sl: float | None, tp: float | None) -> dict:
+        """Build ccxt params to attach SL/TP to the entry order.
+        Bybit V5 accepts stopLoss/takeProfit on the entry; the exchange then
+        manages the conditional orders autonomously, so the position is
+        protected even if the bot is down."""
+        if sl is None and tp is None or self.paper:
+            return {}
+        params: dict = {}
+        if sl is not None:
+            params["stopLoss"] = self._round_price(sl)
+        if tp is not None:
+            params["takeProfit"] = self._round_price(tp)
+        return params
 
-    def market_sell(self, qty: float) -> dict:
+    def market_buy(self, qty: float, sl: float | None = None,
+                   tp: float | None = None) -> dict:
         if self.paper:
             px = self.fetch_price()
             return {"id": f"paper-{int(time.time())}", "price": px, "amount": qty}
-        order = self._ccxt.create_market_sell_order(self.cfg.symbol, qty)
-        return order
+        params = self._attached_sltp_params(sl, tp)
+        return self._ccxt.create_market_buy_order(self.cfg.symbol, qty, params=params)
+
+    def market_sell(self, qty: float, sl: float | None = None,
+                    tp: float | None = None) -> dict:
+        if self.paper:
+            px = self.fetch_price()
+            return {"id": f"paper-{int(time.time())}", "price": px, "amount": qty}
+        params = self._attached_sltp_params(sl, tp)
+        return self._ccxt.create_market_sell_order(self.cfg.symbol, qty, params=params)
+
+    def fetch_position_size(self) -> float | None:
+        """Net signed position size on the exchange (long > 0, short < 0).
+        Used in live mode to detect when the exchange's SL/TP closed our
+        position autonomously. Returns None in paper or on error."""
+        if self.paper or self._ccxt is None:
+            return None
+        try:
+            poss = self._ccxt.fetch_positions([self.cfg.symbol])
+            for p in poss:
+                if p.get("symbol") == self.cfg.symbol:
+                    amt = float(p.get("contracts") or p.get("contractSize") or 0)
+                    side = p.get("side")
+                    if side == "short":
+                        amt = -abs(amt)
+                    return amt
+            return 0.0
+        except Exception as e:
+            self.log.warning(f"fetch_positions failed ({e})")
+            return None
 
 
 # ----------------------------- Bot core -------------------------------------
@@ -744,8 +826,15 @@ class Bot:
             self.log.warning(f"malformed SL/TP for side={side}: "
                              f"sl={sl:.4f} entry≈{entry_px:.4f} tp={tp:.4f} — skipping entry")
             return
+        # Round qty to exchange precision + reject below min-amount / min-cost.
+        # (Paper mode is pass-through.)
+        qty, reject = self.ex.normalize_order(qty, entry_px)
+        if reject:
+            self.log.info(f"skipping order: {reject}")
+            return
         try:
-            order = self.ex.market_buy(qty) if side == 1 else self.ex.market_sell(qty)
+            order = (self.ex.market_buy(qty, sl=sl, tp=tp) if side == 1
+                     else self.ex.market_sell(qty, sl=sl, tp=tp))
         except Exception as e:
             self.log.error(f"entry order FAILED: {e} — no position opened")
             self.events.error(message=f"entry order failed: {e}",
@@ -780,21 +869,31 @@ class Bot:
         pos = self.state.position
         if pos is None:
             return
+        order: dict | None = None
         try:
-            order = self.ex.market_sell(pos.qty) if pos.side == 1 else self.ex.market_buy(pos.qty)
+            order = (self.ex.market_sell(pos.qty) if pos.side == 1
+                     else self.ex.market_buy(pos.qty))
         except Exception as e:
-            # Keep the position; we'll retry on the next tick rather than
-            # silently dropping a live position from our books.
-            self.log.error(f"close order FAILED ({reason}): {e} — retrying next tick")
-            self.events.error(message=f"close order failed: {e}",
-                              exception_type=type(e).__name__)
-            return
-        fill_px = float(order.get("price") or exit_px_hint)
+            # In live mode the exchange-attached SL/TP may have already closed
+            # this position autonomously, in which case our market close errors.
+            # Reconcile by querying the actual position size; if it's flat we
+            # treat the trade as already filled at the SL/TP price.
+            net = self.ex.fetch_position_size()
+            if net is not None and abs(net) < 1e-9:
+                self.log.info(f"close order failed but exchange position is flat "
+                              f"({reason}) — assuming exchange SL/TP filled")
+                order = None  # signal "already closed; use theoretical price"
+            else:
+                self.log.error(f"close order FAILED ({reason}): {e} — retrying next tick")
+                self.events.error(message=f"close order failed: {e}",
+                                  exception_type=type(e).__name__)
+                return
+        fill_px = float(order.get("price") or exit_px_hint) if order else exit_px_hint
         # Paper mode: use the SL/TP price when they triggered — matches the
-        # backtest convention (a resting stop order fills at its price).
-        # Live mode: keep the ACTUAL fill. Overwriting a real fill with the
-        # theoretical stop price would drift our equity from the exchange's.
-        if self.cfg.mode != "live":
+        # backtest convention. Live mode: keep the ACTUAL fill when we have it.
+        # The "exchange already closed" reconcile path also uses the SL/TP price
+        # (best estimate without an extra trades-history query).
+        if self.cfg.mode != "live" or order is None:
             if reason == "sl":
                 fill_px = pos.sl
             elif reason == "tp":
@@ -940,6 +1039,15 @@ class Bot:
         if bar_ts > self.state.last_bar_ts:
             self.state.last_bar_ts = bar_ts
             self.state.save(self.cfg.state_file)
+
+        # Heartbeat for the docker healthcheck — touched every tick so a hung
+        # bot (deadlock, network stall) shows up as Unhealthy even when no bar
+        # has advanced.
+        try:
+            hb = Path(self.cfg.state_file).parent / "heartbeat"
+            hb.write_text(str(int(time.time())))
+        except Exception:
+            pass
 
     def run(self) -> None:
         self.log.info(f"starting bot mode={self.cfg.mode} symbol={self.cfg.symbol} "

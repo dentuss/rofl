@@ -5,11 +5,11 @@ switches direction by detected market regime, and sizes risk down as drawdown
 deepens. Runs in **paper mode by default** — no keys, real market data — and
 goes live on Bybit (or KuCoin/OKX) with a one-line config change.
 
-> **Status:** validated on 7 pairs over 4.6–8.7 years of history. Profitable on
-> all 7; the production pair (INJ) backtests at ~+120% CAGR / −28% max drawdown
-> / Sharpe 1.75 single-pair, improving to Sharpe 1.95 / −18% drawdown as a
-> 5-pair portfolio. Backtests are in-sample — treat them as an upper bound and
-> paper-trade before going live.
+> **Status:** validated on 33 pairs (20 viable) over 4.6–8.7 years of history.
+> The production pair (INJ) backtests at ~+147% CAGR / −27% max drawdown /
+> Sharpe 1.91 single-pair, improving to Sharpe ~2.4 / −19% drawdown / worst
+> month ~−11% as an 8-pair equal-weight portfolio. Backtests are in-sample —
+> treat them as an upper bound and paper-trade before going live.
 
 ---
 
@@ -78,17 +78,23 @@ docker compose up -d --build           # adaptive_inj_bidir by default
 docker compose logs -f
 ```
 
-### Docker (recommended: 5-pair diversified portfolio)
+### Docker — diversified portfolio (recommended)
+
+One `portfolio.sh` wrapper drives both:
 
 ```bash
-docker compose -f docker-compose.bidir-portfolio.yml up -d --build
-docker compose -f docker-compose.bidir-portfolio.yml logs -f
+TOTAL_EQUITY=100 sudo ./portfolio.sh up -d --build         # 5-pair, inj_heavy
+PORTFOLIO=8 TOTAL_EQUITY=100 sudo -E ./portfolio.sh up -d --build  # 8-pair, equal
+sudo ./portfolio.sh status                                  # per-bot health/equity/positions
+sudo ./portfolio.sh archive                                 # snapshot to archives/ for the record
 ```
 
-Runs the strategy on INJ/SOL/ADA/ETH/LINK (40/20/15/15/10% capital). The
-bidirectional strategy decorrelates the pairs (avg pairwise monthly correlation
-0.16), so the portfolio cuts drawdown to −18% and worst-month to −7% vs −28% /
-−16% single-pair.
+| Portfolio | Pairs | Backtest (4.6y) |
+|---|---|---|
+| **5-pair** `inj_heavy` (40/20/15/15/10) | INJ, SOL, ADA, ETH, LINK | Sharpe 2.16 / MDD −18% / worst mo −7% |
+| **8-pair** equal-weight | INJ, AVAX, NEAR, AAVE, GRT, RUNE, DOGE, ADA | Sharpe ~2.4 / MDD −19% / worst mo −11% |
+
+The bidirectional strategy decorrelates the pairs (avg pairwise monthly correlation 0.16) so diversification actually delivers — see [`research/FINDINGS.md`](research/FINDINGS.md) for the full universe sweep and rejected ideas.
 
 ### Going live
 
