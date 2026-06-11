@@ -43,6 +43,26 @@ def _read_events(p: Path) -> list[dict]:
     return out
 
 
+def _parse_ts(v) -> datetime | None:
+    """Event-log timestamps are ISO-8601 strings; accept epoch numbers too."""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return datetime.fromtimestamp(v, tz=timezone.utc)
+    try:
+        dt = datetime.fromisoformat(str(v))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        return None
+
+
+def _fmt_ts(v) -> str:
+    dt = _parse_ts(v)
+    return dt.strftime("%Y-%m-%d %H:%M") if dt else "-"
+
+
 def _trade_table(events: list[dict]) -> list[dict]:
     """Pair entry+exit events into trade rows."""
     open_pos = None
@@ -139,9 +159,11 @@ def build(root: Path) -> None:
         md.append("## All trades (chronological)\n")
         md.append("| Bot | Entry | Exit | Side | Entry px | Exit px | PnL | PnL % | Reason | Bars |")
         md.append("|---|---|---|---|---:|---:|---:|---:|---|---:|")
-        for t in sorted(all_trades_rows, key=lambda r: r.get("entry_ts") or 0):
-            e_ts = datetime.fromtimestamp(t["entry_ts"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M") if t.get("entry_ts") else "-"
-            x_ts = datetime.fromtimestamp(t["exit_ts"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M") if t.get("exit_ts") else "-"
+        for t in sorted(all_trades_rows,
+                        key=lambda r: _parse_ts(r.get("entry_ts"))
+                        or datetime.min.replace(tzinfo=timezone.utc)):
+            e_ts = _fmt_ts(t.get("entry_ts"))
+            x_ts = _fmt_ts(t.get("exit_ts"))
             md.append(f"| {t['bot']} | {e_ts} | {x_ts} | {t.get('side')} | "
                       f"{t.get('entry_px', 0):.4f} | {t.get('exit_px', 0):.4f} | "
                       f"{_fmt_money(t.get('pnl'))} | {_fmt_pct(t.get('pnl_pct'))} | "
@@ -158,7 +180,9 @@ def build(root: Path) -> None:
         with (root / "trades.csv").open("w", newline="") as fh:
             w = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
             w.writeheader()
-            for t in sorted(all_trades_rows, key=lambda r: r.get("entry_ts") or 0):
+            for t in sorted(all_trades_rows,
+                            key=lambda r: _parse_ts(r.get("entry_ts"))
+                            or datetime.min.replace(tzinfo=timezone.utc)):
                 w.writerow(t)
 
     print(f"  wrote {root}/summary.md  ({len(per_bot)} bots, {len(all_trades_rows)} trades)")
