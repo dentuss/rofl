@@ -65,6 +65,26 @@ for bot in "${BOTS[@]}"; do
     export "$var"="$(calc "$TOTAL_EQUITY" "${WEIGHTS[$bot]}")"
 done
 
+# Refuse to start a portfolio if the OTHER one is already running — they
+# share container names for INJ/ADA and the running bots would be evicted.
+case "${1:-}" in
+    up|create|run)
+        if [[ "$PORTFOLIO" == "5" ]]; then
+            other_running="$(docker ps --filter "name=rofl-(avax|near|aave|grt|rune|doge)$" -q 2>/dev/null | wc -l)"
+            other_name="8-pair"
+        else
+            other_running="$(docker ps --filter "name=rofl-(sol|eth|link)$" -q 2>/dev/null | wc -l)"
+            other_name="5-pair"
+        fi
+        if [[ "$other_running" -gt 0 ]]; then
+            echo "ERROR: $other_name portfolio appears to be running ($other_running containers)."
+            echo "       Bring it down first with: sudo ./portfolio.sh down"
+            echo "       (or the corresponding 'PORTFOLIO=N sudo -E ./portfolio.sh down')"
+            exit 1
+        fi
+        ;;
+esac
+
 # Only print the split for lifecycle commands that start bots.
 case "${1:-}" in
     up|create|run)

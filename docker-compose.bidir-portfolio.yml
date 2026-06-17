@@ -56,8 +56,8 @@ services:
       SYMBOL: INJ/USDT
       STARTING_EQUITY: ${INJ_EQUITY:-40}
     volumes:
-      - inj_state:/app/state
-      - inj_logs:/app/logs
+      - inj5_state:/app/state
+      - inj5_logs:/app/logs
       - shared_cache:/app/.cache
 
   sol-bot:
@@ -68,8 +68,8 @@ services:
       SYMBOL: SOL/USDT
       STARTING_EQUITY: ${SOL_EQUITY:-20}
     volumes:
-      - sol_state:/app/state
-      - sol_logs:/app/logs
+      - sol5_state:/app/state
+      - sol5_logs:/app/logs
       - shared_cache:/app/.cache
 
   ada-bot:
@@ -80,8 +80,8 @@ services:
       SYMBOL: ADA/USDT
       STARTING_EQUITY: ${ADA_EQUITY:-15}
     volumes:
-      - ada_state:/app/state
-      - ada_logs:/app/logs
+      - ada5_state:/app/state
+      - ada5_logs:/app/logs
       - shared_cache:/app/.cache
 
   eth-bot:
@@ -92,8 +92,8 @@ services:
       SYMBOL: ETH/USDT
       STARTING_EQUITY: ${ETH_EQUITY:-15}
     volumes:
-      - eth_state:/app/state
-      - eth_logs:/app/logs
+      - eth5_state:/app/state
+      - eth5_logs:/app/logs
       - shared_cache:/app/.cache
 
   link-bot:
@@ -104,19 +104,19 @@ services:
       SYMBOL: LINK/USDT
       STARTING_EQUITY: ${LINK_EQUITY:-10}
     volumes:
-      - link_state:/app/state
-      - link_logs:/app/logs
+      - link5_state:/app/state
+      - link5_logs:/app/logs
       - shared_cache:/app/.cache
 
 volumes:
-  inj_state:
-  sol_state:
-  ada_state:
-  eth_state:
-  link_state:
-  inj_logs:
-  sol_logs:
-  ada_logs:
-  eth_logs:
-  link_logs:
+  inj5_state:
+  sol5_state:
+  ada5_state:
+  eth5_state:
+  link5_state:
+  inj5_logs:
+  sol5_logs:
+  ada5_logs:
+  eth5_logs:
+  link5_logs:
   shared_cache:
