@@ -556,24 +556,57 @@ class Exchange:
         params = self._attached_sltp_params(sl, tp)
         return self._ccxt.create_market_sell_order(self.cfg.symbol, qty, params=params)
 
-    def fetch_position_size(self) -> float | None:
+    def fetch_position_size(self, retries: int = 2) -> float | None:
         """Net signed position size on the exchange (long > 0, short < 0).
         Used in live mode to detect when the exchange's SL/TP closed our
-        position autonomously. Returns None in paper or on error."""
+        position autonomously. Returns None in paper or on persistent error.
+
+        Bybit unified positions can report side as "long"/"short"/"none";
+        in hedge mode an empty side means no position. We sign explicitly.
+        """
+        if self.paper or self._ccxt is None:
+            return None
+        last_err = None
+        for attempt in range(retries + 1):
+            try:
+                poss = self._ccxt.fetch_positions([self.cfg.symbol])
+                for p in poss:
+                    if p.get("symbol") != self.cfg.symbol:
+                        continue
+                    amt_raw = p.get("contracts")
+                    if amt_raw in (None, 0, 0.0, "0"):
+                        return 0.0
+                    amt = abs(float(amt_raw))
+                    side = (p.get("side") or "").lower()
+                    if side == "short":
+                        return -amt
+                    if side == "long":
+                        return amt
+                    # Side unknown but qty present — refuse to guess sign.
+                    self.log.warning(f"fetch_positions: ambiguous side '{p.get('side')}' "
+                                     f"with qty {amt_raw}; treating as unknown")
+                    return None
+                return 0.0
+            except Exception as e:
+                last_err = e
+                time.sleep(2 * (attempt + 1))
+        self.log.warning(f"fetch_positions failed after {retries+1} tries: {last_err}")
+        return None
+
+    def fetch_balance_usdt(self) -> float | None:
+        """Best-effort USDT balance for the unified/derivatives account.
+        Used to validate API keys at startup and reconcile equity_peak when
+        switching from paper to live. Returns None in paper or on error."""
         if self.paper or self._ccxt is None:
             return None
         try:
-            poss = self._ccxt.fetch_positions([self.cfg.symbol])
-            for p in poss:
-                if p.get("symbol") == self.cfg.symbol:
-                    amt = float(p.get("contracts") or p.get("contractSize") or 0)
-                    side = p.get("side")
-                    if side == "short":
-                        amt = -abs(amt)
-                    return amt
-            return 0.0
+            bal = self._ccxt.fetch_balance()
         except Exception as e:
-            self.log.warning(f"fetch_positions failed ({e})")
+            self.log.warning(f"fetch_balance failed ({e})")
+            return None
+        try:
+            return float(bal.get("USDT", {}).get("total") or bal["total"].get("USDT") or 0)
+        except Exception:
             return None
 
 
@@ -836,10 +869,39 @@ class Bot:
             order = (self.ex.market_buy(qty, sl=sl, tp=tp) if side == 1
                      else self.ex.market_sell(qty, sl=sl, tp=tp))
         except Exception as e:
-            self.log.error(f"entry order FAILED: {e} — no position opened")
+            self.log.error(f"entry order FAILED: {e}")
             self.events.error(message=f"entry order failed: {e}",
                               exception_type=type(e).__name__)
+            # FAIL-SAFE: in live mode the order may have filled on the exchange
+            # but the SL/TP attach or response parsing raised. If we just return,
+            # we'd have an unprotected open position the bot doesn't know about.
+            # Query the exchange; if a position exists, market-close it now.
+            net = self.ex.fetch_position_size()
+            if net is not None and abs(net) > 1e-9:
+                self.log.critical(f"ORPHAN POSITION DETECTED on exchange (net={net}); "
+                                  f"force-closing to fail safe")
+                try:
+                    if net > 0:
+                        self.ex.market_sell(abs(net))
+                    else:
+                        self.ex.market_buy(abs(net))
+                except Exception as e2:
+                    self.log.critical(f"force-close FAILED: {e2} — MANUAL INTERVENTION "
+                                      f"required on Bybit for {self.cfg.symbol}")
+                    try:
+                        self.notifier.error(f"ORPHAN POSITION on {self.cfg.symbol}; "
+                                            f"manual close needed")
+                    except Exception:
+                        pass
             return
+        # Sanity: confirm filled qty ≈ requested (Bybit market orders almost
+        # always fill in full, but a tiny qty discrepancy from rounding/maker
+        # is normal; >1% gap is suspicious and worth noting).
+        filled = float(order.get("filled") or order.get("amount") or qty)
+        if abs(filled - qty) / max(qty, 1e-9) > 0.01:
+            self.log.warning(f"partial fill: requested {qty:.6f} got {filled:.6f}")
+            qty = filled
+            notional = filled * float(order.get("price") or entry_px)
         fill_px = float(order.get("price") or entry_px)
         self.state.position = Position(
             side=side, qty=qty, entry_px=fill_px,
@@ -1073,10 +1135,57 @@ class Bot:
             })
         except Exception as e:
             self.log.warning(f"notifier startup failed: {e}")
+        # ----- LIVE-mode preflight: validate keys, warn on stale state, reconcile -----
+        if self.cfg.mode == "live":
+            bal = self.ex.fetch_balance_usdt()
+            if bal is None:
+                msg = ("LIVE pre-flight FAILED: could not fetch balance — check "
+                       "API_KEY/API_SECRET, key permissions (Contract Trade), "
+                       "and IP whitelist. Refusing to start.")
+                self.log.critical(msg)
+                try: self.notifier.error(msg)
+                except Exception: pass
+                raise SystemExit(2)
+            self.log.info(f"LIVE balance check OK: {bal:.2f} USDT on exchange")
+            # If state survived from paper (state equity ≠ exchange balance
+            # by a meaningful margin), warn loudly — operator should have
+            # wiped the volume before going live.
+            ratio = self.state.equity / max(bal, 1e-9)
+            if not (0.5 <= ratio <= 2.0) and self.state.realised_trades > 0:
+                self.log.warning(
+                    f"STATE/BALANCE MISMATCH: state.equity={self.state.equity:.2f} "
+                    f"but exchange has {bal:.2f} USDT. This usually means paper "
+                    f"state was carried into live mode. STOP NOW and either wipe "
+                    f"state with `down -v` or set TRUST_STATE=1 to override.")
+                if os.getenv("TRUST_STATE", "") != "1":
+                    raise SystemExit(3)
+            # Reconcile equity_peak to current balance to prevent a stale paper
+            # peak from instantly triggering the deep-drawdown decay tier.
+            self.state.equity_peak = max(self.state.equity_peak, bal)
+
         if self.state.position:
             p = self.state.position
             self.log.info(f"resuming with open position: side={p.side} qty={p.qty:.6f} "
                           f"entry={p.entry_px:.4f} sl={p.sl:.4f} tp={p.tp:.4f}")
+            # LIVE: verify the position is still actually on the exchange.
+            if self.cfg.mode == "live":
+                net = self.ex.fetch_position_size()
+                expected = p.qty * p.side
+                if net is None:
+                    self.log.warning("could not verify open position on exchange "
+                                     "(fetch_positions failed); continuing with state as-is")
+                elif abs(net) < 1e-9:
+                    self.log.warning(f"position in state but exchange is flat — "
+                                     f"the SL/TP must have fired while bot was down. "
+                                     f"Clearing state position; PnL will not be recorded.")
+                    self.state.position = None
+                    self.state.save(self.cfg.state_file)
+                elif abs(net - expected) / abs(expected) > 0.05:
+                    self.log.warning(f"position size mismatch: state={expected:+.6f} "
+                                     f"exchange={net:+.6f} — using exchange truth")
+                    self.state.position.qty = abs(net)
+                    self.state.position.side = 1 if net > 0 else -1
+                    self.state.save(self.cfg.state_file)
         while not self._stop:
             try:
                 self.tick()

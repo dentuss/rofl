@@ -51,7 +51,7 @@ services:
       <<: *env-defaults
       SYMBOL: INJ/USDT
       STARTING_EQUITY: ${INJ_EQUITY:-12.5}
-    volumes: [inj_state:/app/state, inj_logs:/app/logs, shared_cache:/app/.cache]
+    volumes: [inj8_state:/app/state, inj8_logs:/app/logs, shared_cache:/app/.cache]
 
   avax-bot:
     <<: *bot-defaults
@@ -114,23 +114,23 @@ services:
       <<: *env-defaults
       SYMBOL: ADA/USDT
       STARTING_EQUITY: ${ADA_EQUITY:-12.5}
-    volumes: [ada_state:/app/state, ada_logs:/app/logs, shared_cache:/app/.cache]
+    volumes: [ada8_state:/app/state, ada8_logs:/app/logs, shared_cache:/app/.cache]
 
 volumes:
-  inj_state:
+  inj8_state:
   avax_state:
   near_state:
   aave_state:
   grt_state:
   rune_state:
   doge_state:
-  ada_state:
-  inj_logs:
+  ada8_state:
+  inj8_logs:
   avax_logs:
   near_logs:
   aave_logs:
   grt_logs:
   rune_logs:
   doge_logs:
-  ada_logs:
+  ada8_logs:
   shared_cache:
