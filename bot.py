@@ -452,6 +452,32 @@ class Exchange:
                 self._ccxt = klass({k: v for k, v in params.items() if v})
         self._market: dict | None = None
 
+    # ---- symbol normalization -----------------------------------------
+    def _ccxt_symbol(self) -> str:
+        """Symbol formatted for ccxt API calls.
+
+        Bybit V5 has SEPARATE markets for the same pair string: 'SOL/USDT'
+        matches BOTH the spot market AND the linear-perp market. The spot
+        market rejects attached stopLoss/takeProfit. The defaultType=linear
+        hint we set in __init__ is not enough — ccxt's `market(symbol)` lookup
+        returns the spot market first when the bare 'SOL/USDT' string is
+        ambiguous. The unified-perp form is 'SOL/USDT:USDT' (settlement
+        currency suffix). Append it when missing on bybit; leave the
+        human-friendly cfg.symbol untouched for logs / state / notifier.
+        """
+        sym = self.cfg.symbol
+        if self.cfg.exchange.lower() == "bybit" and sym and ":" not in sym:
+            return f"{sym}:USDT"
+        return sym
+
+    def _ccxt_params(self, extra: dict | None = None) -> dict:
+        """Bybit V5 also wants an explicit category on private endpoints; the
+        symbol suffix isn't enough for fetch_positions / fetch_balance."""
+        p = dict(extra or {})
+        if self.cfg.exchange.lower() == "bybit" and "category" not in p:
+            p["category"] = "linear"
+        return p
+
     # ---- live-mode order helpers ---------------------------------------
     def _load_market(self) -> dict | None:
         """Cache the exchange's market metadata for our symbol (precision,
@@ -461,7 +487,7 @@ class Exchange:
         try:
             if not getattr(self._ccxt, "markets", None):
                 self._ccxt.load_markets()
-            self._market = self._ccxt.market(self.cfg.symbol)
+            self._market = self._ccxt.market(self._ccxt_symbol())
         except Exception as e:
             self.log.warning(f"load_markets failed ({e}); orders will use raw qty")
             self._market = {}
@@ -475,7 +501,7 @@ class Exchange:
             return qty, None
         m = self._load_market() or {}
         try:
-            qty = float(self._ccxt.amount_to_precision(self.cfg.symbol, qty))
+            qty = float(self._ccxt.amount_to_precision(self._ccxt_symbol(), qty))
         except Exception:
             pass
         limits = m.get("limits") or {}
@@ -491,7 +517,7 @@ class Exchange:
         if self.paper or self._ccxt is None:
             return p
         try:
-            return float(self._ccxt.price_to_precision(self.cfg.symbol, p))
+            return float(self._ccxt.price_to_precision(self._ccxt_symbol(), p))
         except Exception:
             return p
 
@@ -499,7 +525,7 @@ class Exchange:
         """Fetch last n closed bars (skips current forming bar in caller)."""
         if self._ccxt is not None:
             try:
-                raw = self._ccxt.fetch_ohlcv(self.cfg.symbol, self.cfg.timeframe,
+                raw = self._ccxt.fetch_ohlcv(self._ccxt_symbol(), self.cfg.timeframe,
                                              limit=n)
                 df = pd.DataFrame(raw, columns=["ts_ms", "open", "high", "low",
                                                 "close", "volume"])
@@ -522,7 +548,7 @@ class Exchange:
     def fetch_price(self) -> float:
         if self._ccxt is not None:
             try:
-                t = self._ccxt.fetch_ticker(self.cfg.symbol)
+                t = self._ccxt.fetch_ticker(self._ccxt_symbol())
                 return float(t["last"])
             except Exception as e:
                 self.log.warning(f"ccxt fetch_ticker failed ({e}); using last close")
@@ -548,7 +574,8 @@ class Exchange:
             px = self.fetch_price()
             return {"id": f"paper-{int(time.time())}", "price": px, "amount": qty}
         params = self._attached_sltp_params(sl, tp)
-        return self._ccxt.create_market_buy_order(self.cfg.symbol, qty, params=params)
+        return self._ccxt.create_market_buy_order(self._ccxt_symbol(), qty,
+                                                   params=self._ccxt_params(params))
 
     def market_sell(self, qty: float, sl: float | None = None,
                     tp: float | None = None) -> dict:
@@ -556,7 +583,8 @@ class Exchange:
             px = self.fetch_price()
             return {"id": f"paper-{int(time.time())}", "price": px, "amount": qty}
         params = self._attached_sltp_params(sl, tp)
-        return self._ccxt.create_market_sell_order(self.cfg.symbol, qty, params=params)
+        return self._ccxt.create_market_sell_order(self._ccxt_symbol(), qty,
+                                                    params=self._ccxt_params(params))
 
     def fetch_position_size(self, retries: int = 2) -> float | None:
         """Net signed position size on the exchange (long > 0, short < 0).
@@ -569,11 +597,13 @@ class Exchange:
         if self.paper or self._ccxt is None:
             return None
         last_err = None
+        ccxt_sym = self._ccxt_symbol()
         for attempt in range(retries + 1):
             try:
-                poss = self._ccxt.fetch_positions([self.cfg.symbol])
+                poss = self._ccxt.fetch_positions([ccxt_sym],
+                                                  params=self._ccxt_params())
                 for p in poss:
-                    if p.get("symbol") != self.cfg.symbol:
+                    if p.get("symbol") not in (ccxt_sym, self.cfg.symbol):
                         continue
                     amt_raw = p.get("contracts")
                     if amt_raw in (None, 0, 0.0, "0"):
@@ -602,7 +632,7 @@ class Exchange:
         if self.paper or self._ccxt is None:
             return None
         try:
-            bal = self._ccxt.fetch_balance()
+            bal = self._ccxt.fetch_balance(params=self._ccxt_params())
         except Exception as e:
             self.log.warning(f"fetch_balance failed ({e})")
             return None
