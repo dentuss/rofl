@@ -1159,9 +1159,16 @@ class Bot:
                     f"state with `down -v` or set TRUST_STATE=1 to override.")
                 if os.getenv("TRUST_STATE", "") != "1":
                     raise SystemExit(3)
-            # Reconcile equity_peak to current balance to prevent a stale paper
-            # peak from instantly triggering the deep-drawdown decay tier.
-            self.state.equity_peak = max(self.state.equity_peak, bal)
+            # Anchor each bot's equity_peak to its OWN starting equity, not the
+            # whole-account balance. In a portfolio every bot shares one Bybit
+            # account, so reconciling against the full balance poisons the
+            # peak (e.g. ada with $45 vs $300 account => instant -85% "dd",
+            # tripping the 0.0x decay tier and freezing entries). Trust the
+            # state's own peak; only floor it to the bot's starting equity in
+            # case it had drifted lower from a fresh init.
+            self.state.equity_peak = max(self.state.equity_peak,
+                                         self.state.equity,
+                                         self.cfg.starting_equity)
 
         if self.state.position:
             p = self.state.position
