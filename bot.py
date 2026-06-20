@@ -655,6 +655,13 @@ class Bot:
         self._stop = False
         self._last_regime: str | None = None
         self._last_daily_summary_day: int = 0
+        # Set when state and the exchange irreconcilably disagree about the
+        # open position (side conflict / unexpected extra size). While halted
+        # the bot touches NOTHING on the exchange — it won't act on a phantom
+        # position nor open new ones — until a human resolves it and restarts.
+        self._halted: bool = False
+        self._halt_reason: str = ""
+        self._last_halt_warn: float = 0.0
         signal.signal(signal.SIGINT, self._on_signal)
         signal.signal(signal.SIGTERM, self._on_signal)
 
@@ -1087,6 +1094,18 @@ class Bot:
             return recent
 
     def tick(self) -> None:
+        # Halted: state and exchange irreconcilably disagree. Do NOTHING that
+        # touches the exchange (no exits on a phantom position, no new entries)
+        # until a human resolves it and restarts. Just heartbeat + warn hourly.
+        if self._halted:
+            self._write_heartbeat()
+            now = time.time()
+            if now - self._last_halt_warn > 3600:
+                self._last_halt_warn = now
+                self.log.critical(f"HALTED ({self._halt_reason}); idle until manual "
+                                  f"reconcile + restart of {self.cfg.symbol}")
+            return
+
         # Daily summary reports PnL for the day that just ended (uses the
         # current day_start_equity), THEN we roll the daily baseline. Rolling
         # here (not lazily inside the circuit breaker) keeps day_pnl correct
@@ -1267,10 +1286,13 @@ class Bot:
                     # didn't open; require human attention.
                     self.log.critical(
                         f"POSITION SIDE CONFLICT: state={expected:+.6f} but "
-                        f"exchange={net:+.6f}. Not adopting — manual review "
+                        f"exchange={net:+.6f}. HALTING this bot — manual review "
                         f"needed for {self.cfg.symbol}.")
+                    self._halted = True
+                    self._halt_reason = (f"side conflict (state {expected:+.4f} "
+                                         f"vs exchange {net:+.4f})")
                     try: self.notifier.error(f"position side conflict on "
-                                             f"{self.cfg.symbol}; manual review")
+                                             f"{self.cfg.symbol}; bot HALTED, manual review")
                     except Exception: pass
                 elif abs(net) < abs(expected) * 0.95:
                     # Exchange has LESS than we recorded (e.g. partial SL/TP
@@ -1288,10 +1310,13 @@ class Bot:
                     # (smaller) accounting and flag for review.
                     self.log.critical(
                         f"position LARGER on exchange than state: state={expected:+.6f} "
-                        f"exchange={net:+.6f}. Keeping our size; manual review needed "
-                        f"for {self.cfg.symbol}.")
+                        f"exchange={net:+.6f}. HALTING this bot — manual review "
+                        f"needed for {self.cfg.symbol}.")
+                    self._halted = True
+                    self._halt_reason = (f"extra size (state {expected:+.4f} "
+                                         f"vs exchange {net:+.4f})")
                     try: self.notifier.error(f"unexpected extra size on "
-                                             f"{self.cfg.symbol}; manual review")
+                                             f"{self.cfg.symbol}; bot HALTED, manual review")
                     except Exception: pass
         while not self._stop:
             try:
