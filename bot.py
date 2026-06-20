@@ -346,6 +346,7 @@ class State:
     last_bar_ts: int = 0         # last fully-closed bar we processed
     position: Optional[Position] = None
     realised_trades: int = 0
+    realised_wins: int = 0       # winning closes (pnl > 0) — for true win rate
     realised_pnl: float = 0.0
     equity_peak: float = 0.0     # high-water mark for equity-decay risk scaling
     day_start_ts: int = 0        # midnight UTC of current trading day
@@ -368,6 +369,7 @@ class State:
             last_bar_ts=d.get("last_bar_ts", 0),
             position=Position(**pos) if pos else None,
             realised_trades=d.get("realised_trades", 0),
+            realised_wins=d.get("realised_wins", 0),
             realised_pnl=d.get("realised_pnl", 0.0),
             equity_peak=d.get("equity_peak", d["equity"]),
             day_start_ts=d.get("day_start_ts", 0),
@@ -811,15 +813,18 @@ class Bot:
                               f"-> risk reduced to {risk*100:.2f}%")
         return risk
 
-    def _daily_loss_blocked(self) -> bool:
-        """True if today's loss has hit the circuit-breaker."""
-        if self.cfg.daily_loss_pct <= 0:
-            return False
-        # Roll the day at UTC midnight
+    def _roll_day(self) -> None:
+        """Reset the daily baseline at UTC midnight. Called every tick so the
+        rollover happens even when the bot holds a position across midnight
+        without attempting an entry (otherwise day_pnl would span days)."""
         cur_day = int(time.time() // 86400) * 86400
         if cur_day > self.state.day_start_ts:
             self.state.day_start_ts = cur_day
             self.state.day_start_equity = self.state.equity
+
+    def _daily_loss_blocked(self) -> bool:
+        """True if today's loss has hit the circuit-breaker."""
+        if self.cfg.daily_loss_pct <= 0:
             return False
         if self.state.day_start_equity <= 0:
             return False
@@ -967,6 +972,8 @@ class Bot:
         pct = (pnl / pos.notional * 100) if pos.notional else 0.0
         self.state.equity += pnl
         self.state.realised_trades += 1
+        if pnl > 0:
+            self.state.realised_wins += 1
         self.state.realised_pnl += pnl
         # Persist immediately: a crash after the fill but before the end-of-tick
         # save must not resurrect an already-closed position on restart.
@@ -1001,11 +1008,9 @@ class Bot:
             self._last_daily_summary_day = cur_day
             return
         day_pnl = self.state.equity - self.state.day_start_equity
-        wr = 0.0  # we don't track per-trade win history; approximate via realised_pnl > 0
-        if self.state.realised_trades > 0:
-            # Best-effort: positive realised PnL means at least some wins.
-            # The event log has full per-trade data for accurate stats.
-            wr = 1.0 if self.state.realised_pnl > 0 else 0.0
+        # True win rate from the per-trade win counter (0.0 when no trades yet).
+        wr = (self.state.realised_wins / self.state.realised_trades
+              if self.state.realised_trades > 0 else 0.0)
         peak = max(self.state.equity_peak, self.state.equity)
         dd = (self.state.equity / peak - 1) if peak > 0 else 0.0
         self.events.daily_summary(equity=self.state.equity, day_pnl=day_pnl,
@@ -1052,8 +1057,12 @@ class Bot:
             return recent
 
     def tick(self) -> None:
-        # Daily summary check (before bar processing)
+        # Daily summary reports PnL for the day that just ended (uses the
+        # current day_start_equity), THEN we roll the daily baseline. Rolling
+        # here (not lazily inside the circuit breaker) keeps day_pnl correct
+        # even when a position is held across midnight with no entry attempt.
         self._maybe_emit_daily_summary()
+        self._roll_day()
 
         df = self._fetch_bars_for_signal()
         warmup = max(self.cfg.entry_n, self.cfg.adx_n, self.cfg.atr_n) + 5
@@ -1147,16 +1156,21 @@ class Bot:
                 except Exception: pass
                 raise SystemExit(2)
             self.log.info(f"LIVE balance check OK: {bal:.2f} USDT on exchange")
-            # If state survived from paper (state equity ≠ exchange balance
-            # by a meaningful margin), warn loudly — operator should have
-            # wiped the volume before going live.
-            ratio = self.state.equity / max(bal, 1e-9)
-            if not (0.5 <= ratio <= 2.0) and self.state.realised_trades > 0:
+            # Paper-carryover guard: compare state.equity against THIS bot's
+            # own slice (starting_equity), NOT the shared account balance. In a
+            # portfolio every bot sees the FULL account via fetch_balance, so
+            # comparing to it false-trips on every bot (a $45 slice vs a $300
+            # account => ratio 0.15). Paper state carried into live instead
+            # shows up as equity wildly off this bot's slice (e.g. a paper INJ
+            # that ran to $20k vs a $120 live slice).
+            slice_ratio = self.state.equity / max(self.cfg.starting_equity, 1e-9)
+            if self.state.realised_trades > 0 and not (0.2 <= slice_ratio <= 5.0):
                 self.log.warning(
-                    f"STATE/BALANCE MISMATCH: state.equity={self.state.equity:.2f} "
-                    f"but exchange has {bal:.2f} USDT. This usually means paper "
-                    f"state was carried into live mode. STOP NOW and either wipe "
-                    f"state with `down -v` or set TRUST_STATE=1 to override.")
+                    f"STATE/SLICE MISMATCH: state.equity={self.state.equity:.2f} vs "
+                    f"this bot's starting slice {self.cfg.starting_equity:.2f} "
+                    f"(ratio {slice_ratio:.2f}). Likely paper state carried into "
+                    f"live. STOP and wipe with `down -v`, or set TRUST_STATE=1 "
+                    f"to override.")
                 if os.getenv("TRUST_STATE", "") != "1":
                     raise SystemExit(3)
             # Anchor each bot's equity_peak to its OWN starting equity, not the
@@ -1199,12 +1213,40 @@ class Bot:
                                      f"Clearing state position; PnL will not be recorded.")
                     self.state.position = None
                     self.state.save(self.cfg.state_file)
-                elif abs(net - expected) / abs(expected) > 0.05:
-                    self.log.warning(f"position size mismatch: state={expected:+.6f} "
-                                     f"exchange={net:+.6f} — using exchange truth")
+                elif (net > 0) != (p.side > 0):
+                    # Exchange shows the OPPOSITE side from our state. Never
+                    # adopt — this means another source touched the account
+                    # (manual trade, or — only if mis-deployed — a second
+                    # process on this symbol). Refuse to manage a position we
+                    # didn't open; require human attention.
+                    self.log.critical(
+                        f"POSITION SIDE CONFLICT: state={expected:+.6f} but "
+                        f"exchange={net:+.6f}. Not adopting — manual review "
+                        f"needed for {self.cfg.symbol}.")
+                    try: self.notifier.error(f"position side conflict on "
+                                             f"{self.cfg.symbol}; manual review")
+                    except Exception: pass
+                elif abs(net) < abs(expected) * 0.95:
+                    # Exchange has LESS than we recorded (e.g. partial SL/TP
+                    # fill, or rounding). Safe to shrink our accounting to the
+                    # exchange truth — we never want to try to close more than
+                    # exists.
+                    self.log.warning(f"position smaller on exchange: state={expected:+.6f} "
+                                     f"exchange={net:+.6f} — shrinking to exchange size")
                     self.state.position.qty = abs(net)
-                    self.state.position.side = 1 if net > 0 else -1
                     self.state.save(self.cfg.state_file)
+                elif abs(net) > abs(expected) * 1.05:
+                    # Exchange has MORE than we opened. Do NOT adopt the larger
+                    # size — managing stops against a position we didn't fully
+                    # open is the money-losing failure mode. Keep our own
+                    # (smaller) accounting and flag for review.
+                    self.log.critical(
+                        f"position LARGER on exchange than state: state={expected:+.6f} "
+                        f"exchange={net:+.6f}. Keeping our size; manual review needed "
+                        f"for {self.cfg.symbol}.")
+                    try: self.notifier.error(f"unexpected extra size on "
+                                             f"{self.cfg.symbol}; manual review")
+                    except Exception: pass
         while not self._stop:
             try:
                 self.tick()
