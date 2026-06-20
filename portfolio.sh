@@ -162,6 +162,38 @@ print(f"{eq:.2f}|{pnl:.2f}|{n}|{peak:.2f}|{pos_s}")
         echo "  scp -r ec2:~/rofl/$out ./   # to copy to your laptop"
         exit 0
         ;;
+    reset-position)
+        # Clear ONE bot's tracked position back to flat, leaving equity/PnL/
+        # peak intact. Use after you've manually flattened that symbol on the
+        # exchange and the bot is stuck in a state/exchange conflict.
+        #   sudo ./portfolio.sh reset-position sol
+        target="${2:-}"
+        if [[ -z "$target" ]]; then
+            echo "usage: ./portfolio.sh reset-position <bot>   (e.g. sol)"; exit 2
+        fi
+        cont="rofl-${target}"
+        echo "Resetting tracked position for ${cont} to flat ..."
+        echo "  (make sure you've already closed ${target^^} on the exchange!)"
+        docker stop "$cont" >/dev/null 2>&1 || true
+        # Edit the state file inside its volume via a throwaway container.
+        vol="$(docker inspect "$cont" --format '{{range .Mounts}}{{if eq .Destination "/app/state"}}{{.Name}}{{end}}{{end}}' 2>/dev/null)"
+        if [[ -z "$vol" ]]; then
+            echo "ERROR: could not find state volume for $cont"; exit 1
+        fi
+        docker run --rm -v "$vol":/s python:3.11-slim python3 -c "
+import json, pathlib
+f = pathlib.Path('/s/bot_state.json')
+d = json.loads(f.read_text())
+old = d.get('position')
+d['position'] = None
+f.write_text(json.dumps(d, indent=2))
+print('  cleared position:', old)
+print('  equity preserved:', d.get('equity'))
+"
+        docker start "$cont" >/dev/null 2>&1 || true
+        echo "Done. ${cont} restarted flat; it will re-enter on its next signal."
+        exit 0
+        ;;
 esac
 
 exec docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
