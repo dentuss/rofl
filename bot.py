@@ -1169,6 +1169,18 @@ class Bot:
             self.state.equity_peak = max(self.state.equity_peak,
                                          self.state.equity,
                                          self.cfg.starting_equity)
+            # Self-heal a poisoned peak left over from earlier code that
+            # reconciled against the whole-account balance. If the bot has
+            # made 0 trades, the peak can only legitimately be at most the
+            # current equity / starting equity — anything higher is the bug.
+            if self.state.realised_trades == 0:
+                clean_peak = max(self.state.equity, self.cfg.starting_equity)
+                if self.state.equity_peak > clean_peak * 1.05:
+                    self.log.warning(
+                        f"healing poisoned equity_peak: {self.state.equity_peak:.2f} "
+                        f"-> {clean_peak:.2f} (0 trades on file)")
+                    self.state.equity_peak = clean_peak
+                    self.state.save(self.cfg.state_file)
 
         if self.state.position:
             p = self.state.position
