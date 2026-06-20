@@ -1094,6 +1094,19 @@ class Bot:
         self._maybe_emit_daily_summary()
         self._roll_day()
 
+        # Bar-close gate: signals only change at bar close. With 5+ portfolio
+        # bots polling every ~30s, fetching 300 bars on EVERY tick burns
+        # through exchange rate limits (Bybit retCode 10006) — but on 1h
+        # bars the strategy only acts ~once an hour. Skip the heavy fetch
+        # when we're still inside the bar we already processed; just
+        # heartbeat and return. In live mode, exchange-side SL/TP fires
+        # autonomously when triggered — we don't need to be polling.
+        bar_sec = Exchange.TF_SECONDS.get(self.cfg.timeframe, 3600)
+        now = int(time.time())
+        if self.state.last_bar_ts > 0 and now < self.state.last_bar_ts + bar_sec + 30:
+            self._write_heartbeat()
+            return
+
         df = self._fetch_bars_for_signal()
         warmup = max(self.cfg.entry_n, self.cfg.adx_n, self.cfg.atr_n) + 5
         if len(df) < warmup:
@@ -1141,9 +1154,12 @@ class Bot:
             self.state.last_bar_ts = bar_ts
             self.state.save(self.cfg.state_file)
 
-        # Heartbeat for the docker healthcheck — touched every tick so a hung
-        # bot (deadlock, network stall) shows up as Unhealthy even when no bar
-        # has advanced.
+        self._write_heartbeat()
+
+    def _write_heartbeat(self) -> None:
+        """Touched every tick (including bar-gated early returns) so a hung
+        bot — deadlock, network stall — shows up as Unhealthy in `docker ps`
+        even when no new bar has closed."""
         try:
             hb = Path(self.cfg.state_file).parent / "heartbeat"
             hb.write_text(str(int(time.time())))
