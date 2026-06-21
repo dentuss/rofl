@@ -569,20 +569,29 @@ class Exchange:
         return params
 
     def market_buy(self, qty: float, sl: float | None = None,
-                   tp: float | None = None) -> dict:
+                   tp: float | None = None, reduce_only: bool = False) -> dict:
         if self.paper:
             px = self.fetch_price()
             return {"id": f"paper-{int(time.time())}", "price": px, "amount": qty}
         params = self._attached_sltp_params(sl, tp)
+        if reduce_only:
+            # Closes MUST be reduce-only. If the exchange already flattened the
+            # position (its attached SL/TP fired autonomously), a plain market
+            # order would OPEN a new reversed, UNPROTECTED position instead of
+            # closing. reduce_only makes Bybit reject the order on a flat book,
+            # which close_position's except-branch then books as "already closed".
+            params["reduceOnly"] = True
         return self._ccxt.create_market_buy_order(self._ccxt_symbol(), qty,
                                                    params=self._ccxt_params(params))
 
     def market_sell(self, qty: float, sl: float | None = None,
-                    tp: float | None = None) -> dict:
+                    tp: float | None = None, reduce_only: bool = False) -> dict:
         if self.paper:
             px = self.fetch_price()
             return {"id": f"paper-{int(time.time())}", "price": px, "amount": qty}
         params = self._attached_sltp_params(sl, tp)
+        if reduce_only:  # see market_buy: never let a close re-open a position
+            params["reduceOnly"] = True
         return self._ccxt.create_market_sell_order(self._ccxt_symbol(), qty,
                                                     params=self._ccxt_params(params))
 
@@ -982,9 +991,9 @@ class Bot:
                                   f"force-closing to fail safe")
                 try:
                     if net > 0:
-                        self.ex.market_sell(abs(net))
+                        self.ex.market_sell(abs(net), reduce_only=True)
                     else:
-                        self.ex.market_buy(abs(net))
+                        self.ex.market_buy(abs(net), reduce_only=True)
                 except Exception as e2:
                     self.log.critical(f"force-close FAILED: {e2} — MANUAL INTERVENTION "
                                       f"required on Bybit for {self.cfg.symbol}")
@@ -1033,8 +1042,8 @@ class Bot:
             return
         order: dict | None = None
         try:
-            order = (self.ex.market_sell(pos.qty) if pos.side == 1
-                     else self.ex.market_buy(pos.qty))
+            order = (self.ex.market_sell(pos.qty, reduce_only=True) if pos.side == 1
+                     else self.ex.market_buy(pos.qty, reduce_only=True))
         except Exception as e:
             # In live mode the exchange-attached SL/TP may have already closed
             # this position autonomously, in which case our market close errors.
