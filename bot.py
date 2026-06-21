@@ -824,6 +824,64 @@ class Bot:
             return "time"
         return None
 
+    def _reconcile_position_with_exchange(self, last_bar: pd.Series) -> bool:
+        """Compare our tracked position to the actual exchange position.
+
+        Catches the case where Bybit's exchange-side SL/TP fires autonomously
+        but our bar-based check_exit misses it (because the bar-fetch fell back
+        to KuCoin spot during a rate-limit, whose H/L differs slightly from
+        Bybit perp's).
+
+        Returns True if a reconcile action was taken (caller should skip the
+        bar-based check); False to defer to check_exit.
+        """
+        if self.state.position is None:
+            return False
+        net = self.ex.fetch_position_size()
+        if net is None:
+            return False  # exchange unreachable — let bar-based check try
+        p = self.state.position
+        expected = p.qty * p.side
+        if abs(net) < 1e-9:
+            # Exchange autonomously closed. Best-effort fill price: if the
+            # closed bar's H/L touched our SL or TP, that's the most likely
+            # exchange fill; otherwise use the bar close (limited info).
+            h, l = float(last_bar["high"]), float(last_bar["low"])
+            if p.side == 1:
+                if l <= p.sl:   fill, why = p.sl, "sl-external"
+                elif h >= p.tp: fill, why = p.tp, "tp-external"
+                else:           fill, why = float(last_bar["close"]), "external"
+            else:
+                if h >= p.sl:   fill, why = p.sl, "sl-external"
+                elif l <= p.tp: fill, why = p.tp, "tp-external"
+                else:           fill, why = float(last_bar["close"]), "external"
+            self.log.warning(f"exchange position is FLAT — booking autonomous "
+                             f"close at {fill:.4f} (reason={why})")
+            self.close_position(fill, why)
+            return True
+        # Live mismatch — same halt logic as the resume reconcile (PR #24):
+        # never adopt an unexpected size/side mid-run.
+        if (net > 0) != (p.side > 0):
+            self.log.critical(f"POSITION SIDE CONFLICT mid-run: state={expected:+.6f} "
+                              f"vs exchange={net:+.6f}. HALTING {self.cfg.symbol}.")
+            self._halted = True
+            self._halt_reason = (f"side conflict mid-run "
+                                 f"(state {expected:+.4f} vs exchange {net:+.4f})")
+            try: self.notifier.error(f"side conflict on {self.cfg.symbol}; bot HALTED")
+            except Exception: pass
+            return True
+        if abs(net) > abs(expected) * 1.05:
+            self.log.critical(f"position LARGER mid-run: state={expected:+.6f} "
+                              f"vs exchange={net:+.6f}. HALTING {self.cfg.symbol}.")
+            self._halted = True
+            self._halt_reason = (f"extra size mid-run "
+                                 f"(state {expected:+.4f} vs exchange {net:+.4f})")
+            try: self.notifier.error(f"extra size on {self.cfg.symbol}; bot HALTED")
+            except Exception: pass
+            return True
+        # Tolerable size mismatch (rounding etc.) — let bar-based check proceed.
+        return False
+
     def _effective_risk(self) -> float:
         """Risk-per-trade with equity-curve decay applied.
 
@@ -1141,9 +1199,19 @@ class Bot:
         # 1) If we have a position, check exits on the just-closed bar
         if self.state.position is not None and bar_ts > self.state.last_bar_ts:
             self.state.position.bars_open += 1
-            reason = self.check_exit(last_bar)
-            if reason is not None:
-                self.close_position(float(last_bar["close"]), reason)
+            # LIVE: detect exchange-side autonomous closes (Bybit's attached
+            # SL/TP fired but our bar-based check missed it — e.g. the KuCoin
+            # REST fallback used while rate-limited has a slightly different
+            # bar low/high than Bybit's actual perp). One extra
+            # fetch_positions per bar advance ≈ 1/hour, negligible API cost.
+            if self.cfg.mode == "live" and not self._reconcile_position_with_exchange(last_bar):
+                reason = self.check_exit(last_bar)
+                if reason is not None:
+                    self.close_position(float(last_bar["close"]), reason)
+            elif self.cfg.mode != "live":
+                reason = self.check_exit(last_bar)
+                if reason is not None:
+                    self.close_position(float(last_bar["close"]), reason)
 
         # 2) If no position, evaluate fresh signal
         if self.state.position is None and bar_ts > self.state.last_bar_ts:
