@@ -1175,12 +1175,15 @@ class Bot:
         # bots polling every ~30s, fetching 300 bars on EVERY tick burns
         # through exchange rate limits (Bybit retCode 10006) — but on 1h
         # bars the strategy only acts ~once an hour. Skip the heavy fetch
-        # when we're still inside the bar we already processed; just
-        # heartbeat and return. In live mode, exchange-side SL/TP fires
-        # autonomously when triggered — we don't need to be polling.
+        # unless a NEW closed bar exists since the last one we processed,
+        # AND its data has had time to settle on the exchange (30s buffer).
         bar_sec = Exchange.TF_SECONDS.get(self.cfg.timeframe, 3600)
         now = int(time.time())
-        if self.state.last_bar_ts > 0 and now < self.state.last_bar_ts + bar_sec + 30:
+        current_bar_open = (now // bar_sec) * bar_sec     # the bar currently forming
+        last_closed_open = current_bar_open - bar_sec     # the bar that just closed
+        already_processed = last_closed_open <= self.state.last_bar_ts
+        data_not_settled = now < current_bar_open + 30
+        if self.state.last_bar_ts > 0 and (already_processed or data_not_settled):
             self._write_heartbeat()
             return
 
