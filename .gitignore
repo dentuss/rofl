@@ -10,3 +10,6 @@ state/
 .venv/
 venv/
 archives/
+
+# Local Claude Code MCP config (references secrets via env vars; keep out of the prod repo)
+.mcp.json
