@@ -33,6 +33,7 @@ modeled. Scripts that produced each result are named.
 | **lean_sol_ada weighting** | WORST scheme of 6 (Sharpe 1.99 vs 2.16 inj_heavy); concentrating in recent winners underperforms | portfolio_construction.py |
 | **max-Sharpe weight optimization** | in-sample optimum (2.13) didn't even beat the inj_heavy heuristic (2.16) — weight tuning has no edge | portfolio_construction.py |
 | **dynamic rebalance (trailing-3mo Sharpe)** | catastrophic performance-chasing: +4% vs +2358% static equal over 4.6y | portfolio_construction.py |
+| **Funding rate as signal** | IC ≈ 0 (mean −0.02 Spearman, funding-z vs 8–72h fwd return; weakly mean-reverting but unexploitable). "Fade extreme funding" overlay cut return ~24pp avg / −0.11 Sharpe — blocks profitable trend trades. Real Bybit/OKX funding, 5 pairs, 400d | funding_signal.py |
 
 ## Universe + portfolio construction (research/expand_universe.py, portfolio_construction.py)
 
@@ -49,10 +50,10 @@ modeled. Scripts that produced each result are named.
 
 ## Meta-conclusion
 
-Five independent attempts to add a predictive/defensive *entry* filter
-(ML ×2, chop, two health variants) all fail the same way: they remove good
-trades because the losses they target are **not predictable** from price/
-indicator signals available at entry. The deterministic core
+Six independent attempts to add a predictive/defensive *entry* filter
+(ML ×2, chop, two health variants, funding rate) all fail the same way: they
+remove good trades because the losses they target are **not predictable** from
+price/indicator/positioning signals available at entry. The deterministic core
 (EMA stack + RSI + ADX + regime + F&G) is information-efficient.
 
 What *does* help is **risk management** (decay ladder) and
