@@ -51,6 +51,7 @@ import random
 import signal
 import sys
 import time
+import zlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
@@ -200,6 +201,12 @@ class BotConfig:
     state_file: str = os.getenv("STATE_FILE", "bot_state.json")
     log_file: str = os.getenv("LOG_FILE", "bot.log")
     poll_seconds: int = int(os.getenv("POLL_SECONDS", "30"))
+    # Deterministic per-symbol fetch stagger (seconds). Portfolio bots share one
+    # IP; without staggering they all fetch within a few seconds of each bar
+    # close and burst Bybit's per-IP rate limit (retCode 10006 -> KuCoin
+    # fallback). Each symbol waits a stable 0..fetch_stagger_secs past the
+    # settle buffer before its first fetch, spreading the 5 bots out.
+    fetch_stagger_secs: int = int(os.getenv("FETCH_STAGGER_SECS", "45"))
     # Donchian params
     entry_n: int = 20
     exit_n: int = 10
@@ -671,6 +678,10 @@ class Bot:
         self._halted: bool = False
         self._halt_reason: str = ""
         self._last_halt_warn: float = 0.0
+        # Stable per-symbol offset (see BotConfig.fetch_stagger_secs). crc32 is
+        # used (not Python's salted hash) so the offset is identical every run.
+        self._fetch_stagger = zlib.crc32(self.cfg.symbol.encode()) \
+            % (max(self.cfg.fetch_stagger_secs, 0) + 1)
         signal.signal(signal.SIGINT, self._on_signal)
         signal.signal(signal.SIGTERM, self._on_signal)
 
@@ -1191,7 +1202,9 @@ class Bot:
         current_bar_open = (now // bar_sec) * bar_sec     # the bar currently forming
         last_closed_open = current_bar_open - bar_sec     # the bar that just closed
         already_processed = last_closed_open <= self.state.last_bar_ts
-        data_not_settled = now < current_bar_open + 30
+        # 30s base settle buffer + deterministic per-symbol stagger so the
+        # portfolio bots don't all fetch at once and trip the per-IP rate limit.
+        data_not_settled = now < current_bar_open + 30 + self._fetch_stagger
         if self.state.last_bar_ts > 0 and (already_processed or data_not_settled):
             self._write_heartbeat()
             return
@@ -1268,9 +1281,12 @@ class Bot:
     def run(self) -> None:
         self.log.info(f"starting bot mode={self.cfg.mode} symbol={self.cfg.symbol} "
                       f"tf={self.cfg.timeframe} preset={self.cfg.preset} "
-                      f"strategy={self.cfg.strategy} sentiment={self.cfg.use_sentiment} "
-                      f"htf={self.cfg.use_htf} short={self.cfg.allow_short} "
-                      f"equity={self.state.equity:.2f}")
+                      f"strategy={self.cfg.strategy} short={self.cfg.allow_short} "
+                      f"regime={self.cfg.use_adaptive_regime} "
+                      f"fng={self.cfg.use_fng_extreme_filter} "
+                      f"decay={'on' if (self.cfg.eq_decay_tiers or self.cfg.eq_risk_decay) else 'off'} "
+                      f"htf={self.cfg.use_htf} sentiment={self.cfg.use_sentiment} "
+                      f"stagger={self._fetch_stagger}s equity={self.state.equity:.2f}")
         self.events.bot_start(mode=self.cfg.mode, exchange=self.cfg.exchange,
                               symbol=self.cfg.symbol, tf=self.cfg.timeframe,
                               preset=self.cfg.preset, strategy=self.cfg.strategy,
