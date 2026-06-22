@@ -1,14 +1,19 @@
-"""Live trading bot for the triple-confirm long-only strategy.
+"""Live trading bot. Paper by default; live on Bybit USDT-perps with keys.
+
+Production strategy is `triple_bidir` (long + mirror short). The long-only
+`triple_long` is the original/legacy variant, kept for the long-only presets.
+The live portfolio runs the `adaptive_bidir` preset per pair = bidir signal +
+directional regime filter + F&G 3-day persistence filter + 3-tier drawdown
+decay (see SESSION_HANDOFF.md and research/FINDINGS.md).
 
 Default mode is PAPER (dry-run). Set MODE=live and provide API keys to trade
 real money — only do this after you've reviewed the code and the risks.
 
-Strategy: triple_long (long-only)
-  - EMA stack: fast > slow > trend (9/26/50)
-  - Momentum: RSI(14) > 55
+Strategy: triple_bidir (long + symmetric short)
+  - EMA stack: fast > slow > trend (9/26/50)   (inverted for shorts)
+  - Momentum: RSI(14) > 55 long  /  < 45 short
   - Trend strength: ADX(14) > 22
-  - Stops: 1.8x ATR(14)
-  - TP:    3.0x ATR(14)
+  - Stops: 1.8x ATR(14)   Targets: 3.0x ATR(14)
 
 Presets (STRATEGY_PRESET env var):
   steady (default)  ETH/USDT 1h, risk 1.5%
@@ -842,6 +847,14 @@ class Bot:
                 return "tp"
         if pos.bars_open >= self.cfg.max_bars_in_trade:
             return "time"
+        # NOTE: deliberately NO signal-flip exit. The backtest closes (and
+        # reverses) a position when the opposite signal appears; the live bot
+        # only evaluates new signals when flat, so it holds through flips.
+        # Measured immaterial: across the 5 prod pairs over 1y this fires <1%
+        # of exits and those trades are slightly net-negative — a full opposite
+        # EMA-stack+RSI reversal almost always trips the 1.8xATR stop first.
+        # Accepted approximation. (test_parity only checks the signal series,
+        # NOT position management — re-measure if exit logic ever changes.)
         return None
 
     def _reconcile_position_with_exchange(self, last_bar: pd.Series) -> bool:

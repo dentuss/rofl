@@ -305,7 +305,21 @@ for any private endpoint — pass `_ccxt_params()` to include
 ### Pattern E: rate limit IP-based, not key-based
 Public market data (`fetch_ohlcv`, `fetch_ticker`) on Bybit is rate-limited
 by **IP**. Adding more API keys does NOT help. The fix is to fetch less
-often (PR #23 / PR #26 bar-close gate).
+often (PR #23 / PR #26 bar-close gate, plus the per-symbol fetch stagger that
+de-bursts the 5 bots at each bar close).
+
+### Pattern F: closes must be reduce-only (or they REVERSE the position)
+`close_position()` and the orphan force-close place market orders to flatten.
+If the exchange already closed the position (its attached SL/TP fired
+autonomously), a plain market order does NOT error — it **opens a new
+reversed, unprotected position**. The "already flat → just book it" path only
+works because `reduce_only=True` makes Bybit reject the order on a flat book,
+which the `except` branch then treats as "already closed". Found live
+2026-06-22: an ETH short with no SL/TP appeared after the ETH long stopped
+out, because the reconcile booked a phantom close while the non-reduce-only
+order quietly opened the short. Fixed by passing `reduce_only=True` on every
+close (regression: `test_reduce_only_close.py`). **Rule:** any order whose
+purpose is to CLOSE must be reduce-only.
 
 ---
 
