@@ -35,6 +35,13 @@ modeled. Scripts that produced each result are named.
 | **dynamic rebalance (trailing-3mo Sharpe)** | catastrophic performance-chasing: +4% vs +2358% static equal over 4.6y | portfolio_construction.py |
 | **Funding rate as signal** | IC ≈ 0 (mean −0.02 Spearman, funding-z vs 8–72h fwd return; weakly mean-reverting but unexploitable). "Fade extreme funding" overlay cut return ~24pp avg / −0.11 Sharpe — blocks profitable trend trades. Real Bybit/OKX funding, 5 pairs, 400d | funding_signal.py |
 
+## Promising — UNDER VALIDATION (not adopted; do not deploy on this evidence)
+
+| Idea | Preliminary result | Caveats | Script |
+|---|---|---|---|
+| **Post-stop same-side re-entry cooldown** — after a SL on side X, block new side-X entries for K bars | Large, consistent lift on ALL 5 pairs (recent 400d 1h): K=3 mean return +136%→+365%, Sharpe **1.48→2.58**, MDD −39%→−29%. Targets the post-stop V-bounce whipsaw (e.g. INJ 2026-06-24). Distinct from the rejected fresh-crossover gating: only after a *loss*, only *same side*. | Measured **without** the production regime/F&G filters (no sklearn locally) — marginal benefit on top of them is unknown and likely smaller (both target counter-trend trades). **Single in-sample 400d window** → period-dependence risk. Return multiples are compounding-inflated; Sharpe is the trustworthy metric. MUST validate with-regime + walk-forward before any live use. | test_reentry_cooldown.py |
+| **ETH → AAVE swap / drop ETH** | Recent 400d: ETH→AAVE beats keep on all metrics (Sharpe 1.92→2.16, ret +174→+194%, MDD −28→−22%); drop-to-4 mild + (Sharpe 2.08). | ETH is NOT a bad pair (+107% standalone, mid-pack; its live 0/4 week was variance). AAVE's edge is recent-window-specific = the "chase recent winners" trap. Keep ETH; revisit only with multi-window + with-regime evidence. | test_eth_swap.py |
+
 ## Universe + portfolio construction (research/expand_universe.py, portfolio_construction.py)
 
 - **Strategy is NOT INJ-specific.** Of 33 pairs swept, 20 clear Sharpe ≥ 1.1;
