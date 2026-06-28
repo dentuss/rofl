@@ -979,6 +979,20 @@ class Bot:
         risk = self._effective_risk()
         if risk <= 0:
             self.log.warning("deep-drawdown hard stop active — not opening new trade")
+            # Surface the freeze (throttled): a stale/poisoned equity_peak silently
+            # blocks ALL entries until a restart self-heals it (see the 06-19
+            # freeze in the archives). Alert once a day so it can't go unnoticed.
+            now = time.time()
+            if now - getattr(self, "_last_freeze_alert", 0.0) > 86400:
+                self._last_freeze_alert = now
+                try:
+                    self.notifier.error(
+                        f"{self.cfg.symbol}: deep-drawdown hard-stop is blocking "
+                        f"entries (equity {self.state.equity:.2f} vs peak "
+                        f"{self.state.equity_peak:.2f}). If that drawdown looks "
+                        f"wrong, equity_peak may be stale — restart to self-heal.")
+                except Exception:
+                    pass
             return
         risk_dollars = self.state.equity * risk
         notional = min(risk_dollars / stop_dist, self.state.equity * self.cfg.max_leverage)
@@ -998,6 +1012,10 @@ class Bot:
         if reject:
             self.log.info(f"skipping order: {reject}")
             return
+        # qty may have been floored to the exchange lot step (e.g. ETH's 0.01),
+        # dropping it below the risk-target size. Recompute notional from the
+        # ACTUAL qty so fees / pnl% / risk accounting reflect the real position.
+        notional = qty * entry_px
         try:
             order = (self.ex.market_buy(qty, sl=sl, tp=tp) if side == 1
                      else self.ex.market_sell(qty, sl=sl, tp=tp))
@@ -1330,6 +1348,10 @@ class Bot:
                 except Exception: pass
                 raise SystemExit(2)
             self.log.info(f"LIVE balance check OK: {bal:.2f} USDT on exchange")
+            # Warm the market-metadata cache now so the FIRST entry doesn't race
+            # ccxt's symbol resolution to the spot market (the "attached stopLoss
+            # not supported for spot market orders" failure seen on a cold start).
+            self.ex._load_market()
             # Paper-carryover guard: compare state.equity against THIS bot's
             # own slice (starting_equity), NOT the shared account balance. In a
             # portfolio every bot sees the FULL account via fetch_balance, so
