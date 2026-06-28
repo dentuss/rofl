@@ -25,6 +25,76 @@ shipping anything.
 
 ---
 
+## 0.5 ⏯ CONTINUE FROM HERE — handoff @ 2026-06-28 (read this first)
+
+> Written when the session moved to terminal Claude Code on the local repo.
+> The numbered sections below are the durable onboarding; THIS block is the
+> live picture and the open threads to pick up.
+
+### Current state
+- **Bots are STOPPED** (`portfolio.sh down`). **No open positions** — the last
+  one (an ETH short) was closed manually. Clean slate for a reassessment.
+- **Latest code is on `main` but NOT yet deployed** to EC2 (bots are down).
+  Resume = `git pull origin main && sudo ./portfolio.sh up -d --build`.
+- **Books vs exchange disagree.** Bots' state booked ≈ **$302.52** total, but
+  real Bybit equity is **lower** (was ~$297.9 on 06-22). Causes: (a) every
+  `*-external` exit booked at the *theoretical* SL/TP, not the real fill;
+  (b) two reduce-only orphan trades (SOL 06-20, ETH 06-22) never entered the
+  books; (c) funding/fee modeling drift. **Live reconcile still pending** — the
+  read-only Bybit MCP kept dropping this session.
+
+### What shipped this session (all squash-merged to `main`, in order)
+- `306ade1` **reduce-only on ALL closes** (Pattern F) — closes were
+  non-reduce-only and REVERSED into unprotected positions when the exchange had
+  already flattened. Regression: `test_reduce_only_close.py`.
+- `94a12ef` gitignore `.mcp.json`.
+- `04c0bcc` **per-symbol fetch stagger** + clearer startup log (live rate-limits
+  dropped 17/31 → 1-3 per day).
+- `5a39744` docstring fix + documented the (immaterial) signal-flip approximation.
+- `943c115` **`test_exec_parity.py`** — replays the REAL bot exec methods vs the
+  backtester; catches exec-path divergences `test_parity.py` cannot.
+- `60d83c7` funding-as-signal research → **rejected** (IC≈0).
+- `2b0d6eb` **exec fixes**: recompute notional after lot-step rounding (ETH was
+  under-sized ~54%); warm markets at startup (cold-start spot-routing miss);
+  throttled alert when the DD hard-stop freezes a bot.
+- `0c22229` re-entry-cooldown + ETH-swap research (FINDINGS "Promising" section).
+
+### Open threads — pick up here (priority order)
+1. **Reconnect the Bybit MCP, then RECONCILE.** Read-only (`rolfbot_dev`,
+   IP-whitelisted). A terminal session in this repo should load the project
+   `.mcp.json` — verify `claude mcp list` / `claude mcp get bybit`; full app
+   restart after any `setx`. Then `getWalletBalance` + `getClosedPnl`
+   (06-19→now) + `getPositionInfo`, compare to the booked $302.52, quantify the
+   gap. (Memory: `bybit-readonly-mcp-dev`.)
+2. **VALIDATE the re-entry cooldown — the big lead.** Block same-side entry for
+   K bars after a SL on that side. Recent 400d, *no* regime/F&G: K=3 lifted mean
+   Sharpe **1.48→2.58**, MDD −39%→−29% on all 5 pairs
+   (`research/test_reentry_cooldown.py`). **Too good to trust as-is** — re-run
+   **WITH regime+F&G** (needs sklearn → 3.11 venv or EC2/Docker) and
+   **walk-forward** over multiple windows. Survives → paper → small live. It's
+   an ENTRY filter (FINDINGS is skeptical) but a genuinely NEW mechanism.
+3. **External-fill accounting fix** (root of the balance gap): book `*-external`
+   closes at the actual exchange fill, not the theoretical SL/TP. Proposed, not
+   built; adds one API call per external close.
+4. **Resume decision:** deploy latest `main` + restart the fleet, or stay
+   stopped pending the cooldown validation.
+
+### Settled this session (don't re-litigate)
+- **Keep ETH.** Mid-pack over 400d (+107% standalone); its live 0/4 week was
+  variance. AAVE looks better recently but that's the chase-recent-winners trap.
+- **Funding-as-signal: rejected** (IC≈0). **Signal-flip exit** the live bot
+  lacks is **immaterial** (measured <1% of exits).
+
+### Local-env notes for the terminal session
+- Repo runs on **Python 3.14** locally with **no sklearn** → the regime GMM is
+  skipped (`REGIME_AVAILABLE=False`); paper smokes run but without regime, and
+  `test_parity.py` / any with-regime backtest needs a **sklearn env** (3.11
+  venv, or run in the Docker image which bundles it).
+- No-sklearn-needed checks: `python test_reduce_only_close.py`,
+  `python test_exec_parity.py`, and the `research/*` backtests.
+
+---
+
 ## 1. What this project IS and IS NOT
 
 **Is**: a strict, well-validated, conservatively-engineered trading bot for a
@@ -48,15 +118,16 @@ most additions hurt more than help.
 
 | Item | Value |
 |---|---|
-| **Mode** | LIVE on Bybit USDT-perp |
+| **Mode** | **STOPPED 2026-06-28** (was LIVE; resume = `git pull origin main && sudo ./portfolio.sh up -d --build`) |
 | **Capital deployed** | $300 USDT |
 | **Portfolio** | 5-pair `inj_heavy` (INJ 40 / SOL 20 / ADA 15 / ETH 15 / LINK 10) |
-| **Realised P&L** | +$1.63 (very early, microscopic — strategy operates on weeks/months) |
+| **Realised P&L** | bots booked **+$2.52 → $302.52** over the first ~week; real exchange equity is LOWER — reconcile pending (see §0.5) |
 | **EC2 instance** | t4g.medium (4 GB) in `ap-southeast-1` Singapore |
-| **API key** | IP-whitelisted to EC2 elastic IP, Contract Trade + Position only, no withdrawal |
+| **API key** | prod: IP-whitelisted to EC2, Contract Trade + Position, no withdrawal. dev (laptop/terminal): read-only `rolfbot_dev` for the MCP |
 
-**Open positions at last check**: ADA SHORT 319, ETH LONG 0.04. Verify with
-`sudo ./portfolio.sh status` before assuming anything.
+**Open positions**: **FLAT** — all closed (the last, an ETH short, closed
+manually). Bots stopped. Verify with `sudo ./portfolio.sh status` before
+assuming anything.
 
 **Critical**: do not advise wiping state (`down -v`) while positions are open
 — it disconnects the bot's accounting from the exchange and the user has to
@@ -426,10 +497,11 @@ Do not propose changes to the strategy core without:
 | `research/build_archive.py` | Snapshot tool for portfolio runs |
 | `research/test_*.py` | The experiments (most rejected, all instructive) |
 
-**Last meaningful state**: 26 PRs merged. Strategy stable. Live trading
-green. Most recent fix (PR #26) was the bar-close gate off-by-one. After
-that landed and was rebuilt on EC2, the system should be quiet — minimal
-log output, ~1 OHLCV fetch per bot per hour, trades emerging organically
-from the strategy.
+**Last meaningful state (2026-06-28)**: first ~week of live running done, then
+**bots stopped, flat, for a reassessment**. See **§0.5 "Continue from here"** for
+the full picture — the live-exec bugs found & fixed this session, the new test
+tooling, and the open threads (MCP reconcile, the re-entry-cooldown validation,
+the external-fill accounting fix). The strategy core is stable; this session's
+work was all in the live-execution path + research.
 
 Good luck. Don't break it.
