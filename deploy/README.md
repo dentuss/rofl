@@ -241,6 +241,27 @@ Events go to your phone from **both paper and live mode**, tagged `📝 PAPER` o
 
 You'll get an instant "🚀 Bot started" message. Trades, daily summaries, regime changes, and errors arrive automatically. Missing token? Notifier silently disables itself; bot keeps running.
 
+### Interactive control buttons (5-pair portfolio)
+
+The per-bot notifier above is **outbound only** (it pushes events). The 5-pair
+portfolio (`docker-compose.bidir-portfolio.yml`) also starts a **`tg-control`**
+service — one container that long-polls Telegram and answers on-demand buttons
+for the whole portfolio. Send your bot **`/menu`** to get:
+
+| Button | Shows |
+|---|---|
+| 📊 Stats | booked equity, realised PnL, win rate, per-bot equity + drawdown, and real Bybit equity (+ gap) |
+| 📈 Positions | every open position with side / qty / entry / SL / TP / unrealized PnL (live from Bybit) |
+| 🗓 Today | today's PnL (since UTC midnight) + all-time realised, per bot |
+| ❤️ Health | per-bot heartbeat age — flags a hung / stopped bot as STALE |
+| 🧮 Reconcile | booked total vs real Bybit equity and the gap |
+
+It reads each bot's state volume **read-only** and uses the same `API_KEY` /
+`API_SECRET` for **read-only** Bybit calls (it never places orders). It only
+responds to `TELEGRAM_CHAT_ID`. With no API key it still works in booked-only
+mode. Verify: `docker compose -f docker-compose.bidir-portfolio.yml logs tg-control`
+should show `tg_control up`.
+
 ---
 
 ## Going live on Bybit (after 2-3 weeks of paper)
