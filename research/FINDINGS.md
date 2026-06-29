@@ -16,6 +16,7 @@ modeled. Scripts that produced each result are named.
 | Three-tier decay (−20/−35/−50%) | free on healthy pairs; LTC MDD −69%→−51% AND higher final | test_decay_funding.py, decay on LTC/BTC |
 | Multi-pair portfolio (inj_heavy) | MDD −28%→−18%, Sharpe 1.75→1.95, worst-month −16%→−7% | multipair_bidir.py |
 | scikit-learn bundled | adaptive presets actually run the regime GMM | — |
+| **Post-stop same-side re-entry cooldown** (K=3 bars; env `COOLDOWN_BARS`) | After a SL on side X, block new side-X entries for 3 bars — kills the post-stop V-bounce whipsaw. Full prod stack, 5 pairs, 3.7y: portfolio Sharpe **2.27→3.46**, worst month **−8.6%→−2.6%**, MDD −19.8%→−17.2%, beats baseline 41/44 months; OOS (held-out 40%) ΔSharpe +1.10. Placebo control confirms it is post-SL-same-side-specific. Implemented in bot.py + both backtest engines; exec-parity locked (live==backtest to the cent). | test_reentry_cooldown_prod.py, cooldown_report.py |
 
 ## Rejected (tested, did not clear the bar)
 
@@ -39,7 +40,7 @@ modeled. Scripts that produced each result are named.
 
 | Idea | Preliminary result | Caveats | Script |
 |---|---|---|---|
-| **Post-stop same-side re-entry cooldown** — after a SL on side X, block new side-X entries for K bars | Large, consistent lift on ALL 5 pairs (recent 400d 1h): K=3 mean return +136%→+365%, Sharpe **1.48→2.58**, MDD −39%→−29%. Targets the post-stop V-bounce whipsaw (e.g. INJ 2026-06-24). Distinct from the rejected fresh-crossover gating: only after a *loss*, only *same side*. | Measured **without** the production regime/F&G filters (no sklearn locally) — marginal benefit on top of them is unknown and likely smaller (both target counter-trend trades). **Single in-sample 400d window** → period-dependence risk. Return multiples are compounding-inflated; Sharpe is the trustworthy metric. MUST validate with-regime + walk-forward before any live use. | test_reentry_cooldown.py |
+| ~~Post-stop same-side re-entry cooldown~~ | **PROMOTED to Adopted (2026-06-29)** after passing with-regime + walk-forward + OOS validation. See the Adopted table. | — | test_reentry_cooldown_prod.py |
 | **ETH → AAVE swap / drop ETH** | Recent 400d: ETH→AAVE beats keep on all metrics (Sharpe 1.92→2.16, ret +174→+194%, MDD −28→−22%); drop-to-4 mild + (Sharpe 2.08). | ETH is NOT a bad pair (+107% standalone, mid-pack; its live 0/4 week was variance). AAVE's edge is recent-window-specific = the "chase recent winners" trap. Keep ETH; revisit only with multi-window + with-regime evidence. | test_eth_swap.py |
 
 ## Universe + portfolio construction (research/expand_universe.py, portfolio_construction.py)

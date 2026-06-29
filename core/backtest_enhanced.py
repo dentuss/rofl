@@ -85,8 +85,9 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
     # Strategy-health gate state
     marks: list[float] = []          # equity mark history for trailing lookback
     health_paused = False
+    block_long_until = block_short_until = -1   # post-SL same-side cooldown
 
-    for ts, row in df.iterrows():
+    for i, (ts, row) in enumerate(df.iterrows()):
         o, h, l, c = row["open"], row["high"], row["low"], row["close"]
         sig_next = int(row["sig_next"])
         cur_day = ts.normalize()
@@ -159,6 +160,11 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
                     tp=pos_tp, pnl=pnl, fees=fee, reason=reason,
                     bars_held=pos_bars,
                 ))
+                if reason == "sl" and cfg.cooldown_bars > 0:
+                    if pos_side == 1:
+                        block_long_until = i + cfg.cooldown_bars
+                    else:
+                        block_short_until = i + cfg.cooldown_bars
                 pos_side = 0
                 pos_qty = 0.0
                 partial_done = False
@@ -174,9 +180,11 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
 
         # 2) New entry — only if flat AND not blocked AND have signal AND
         #    risk scaling hasn't hit a 0.0 tier (deep-drawdown hard stop) AND
-        #    the strategy-health gate isn't paused
+        #    the strategy-health gate isn't paused AND not in a post-SL cooldown
+        cd_blocked = (sig_next == 1 and i < block_long_until) or \
+                     (sig_next == -1 and i < block_short_until)
         if (pos_side == 0 and sig_next != 0 and not day_blocked
-                and risk_scale > 0 and not health_paused):
+                and risk_scale > 0 and not health_paused and not cd_blocked):
             sl = row["sl_next"]
             tp = row["tp_next"]
             bar_atr = row["atr14"]

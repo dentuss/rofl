@@ -25,6 +25,10 @@ class BTConfig:
     slip_bps: float = 2.0               # 2bp = 0.02% slippage per side
     max_bars_in_trade: int = 96         # time stop (96 bars = 24h on 15m, 4d on 1h)
     allow_short: bool = True
+    # Post-stop same-side re-entry cooldown: after a SL on side X, block new
+    # side-X entries for this many bars. 0 disables (default — preserves all
+    # prior results). Validated lift (see research/FINDINGS.md "cooldown").
+    cooldown_bars: int = 0
 
 
 @dataclass
@@ -124,8 +128,9 @@ def run_backtest(price_df: pd.DataFrame, sig_df: pd.DataFrame,
     pos_open_time: Optional[pd.Timestamp] = None
     pos_bars = 0
     pos_notional = 0.0
+    block_long_until = block_short_until = -1   # post-SL same-side cooldown
 
-    for ts, row in df.iterrows():
+    for i, (ts, row) in enumerate(df.iterrows()):
         o, h, l, c = row["open"], row["high"], row["low"], row["close"]
         sig_next = int(row["sig_next"])
 
@@ -167,11 +172,18 @@ def run_backtest(price_df: pd.DataFrame, sig_df: pd.DataFrame,
                     notional=pos_notional, sl=pos_sl, tp=pos_tp,
                     pnl=pnl, fees=exit_fee, reason=reason, bars_held=pos_bars,
                 ))
+                if reason == "sl" and cfg.cooldown_bars > 0:
+                    if pos_side == 1:
+                        block_long_until = i + cfg.cooldown_bars
+                    else:
+                        block_short_until = i + cfg.cooldown_bars
                 pos_side = 0
                 pos_qty = 0.0
 
         # 2) If flat and we have a fresh signal at this bar's open, enter
-        if pos_side == 0 and sig_next != 0:
+        blocked = (sig_next == 1 and i < block_long_until) or \
+                  (sig_next == -1 and i < block_short_until)
+        if pos_side == 0 and sig_next != 0 and not blocked:
             sl = row["sl_next"]
             tp = row["tp_next"]
             if pd.notna(sl) and pd.notna(tp) and equity > 0:
