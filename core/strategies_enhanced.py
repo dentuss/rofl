@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from core.indicators import atr, ema, sma
+from core.indicators import atr
 from core.strategies import donchian_breakout
 from core.strategies_sentiment import donchian_skip_fear
 
