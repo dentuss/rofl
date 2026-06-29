@@ -22,7 +22,6 @@ from core.indicators import (
     ema,
     macd,
     rsi,
-    sma,
     supertrend,
 )
 

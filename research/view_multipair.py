@@ -18,7 +18,6 @@ _PARENT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _PARENT not in _sys.path:
     _sys.path.insert(0, _PARENT)
 
-from copy import deepcopy
 import numpy as np
 import pandas as pd
 

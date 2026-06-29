@@ -57,7 +57,7 @@ Note: user-data runs as **root**, which is why we explicitly `sudo -u ubuntu`
 
 ## Picking a preset
 
-The bot ships with ~15 presets (see `bot.py` → `PRESETS`). For a **2-3 week paper-trading competence test**, use:
+The bot ships with ~20 presets (see `bot.py` → `PRESETS`). For a **2-3 week paper-trading competence test**, use:
 
 ```
 STRATEGY_PRESET=adaptive_inj_bidir

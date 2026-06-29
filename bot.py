@@ -18,8 +18,6 @@ Strategy: triple_bidir (long + symmetric short)
 Presets (STRATEGY_PRESET env var):
   steady (default)  ETH/USDT 1h, risk 1.5%
                     5y: +201%, CAGR ~25%, MDD -29%, monthly median +1.4%
-  conservative      ETH+BTC+SOL 1h portfolio (run via run_portfolio.sh)
-                    5y: +434%, CAGR ~40%, MDD -22%, monthly median ~2-3%
   growth            SOL/USDT 30m, risk 1.5%
                     5y: +945%, CAGR ~64%, MDD -52%, monthly median +3.0%
   high_return       SOL/USDT 30m, risk 2.0%
