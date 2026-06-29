@@ -25,11 +25,62 @@ shipping anything.
 
 ---
 
-## 0.5 ⏯ CONTINUE FROM HERE — handoff @ 2026-06-28 (read this first)
+## 0.5 ⏯ CONTINUE FROM HERE — handoff @ 2026-06-29 (read this first)
 
 > Written when the session moved to terminal Claude Code on the local repo.
 > The numbered sections below are the durable onboarding; THIS block is the
 > live picture and the open threads to pick up.
+
+### ✅ 2026-06-29 session — local env set up + all four open threads worked
+
+**Local env is now seamless (no EC2/Docker needed for research).** A `.venv` on
+the installed **Python 3.14** runs the full stack — scikit-learn 1.9, pandas 3.0,
+ccxt, pyarrow all install & import; the regime GMM produces real labels;
+`test_parity` 3/3, all offline tests pass. Run things with
+`PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe <script>` (allowlisted → no
+prompt). The "needs a 3.11 venv" note in §0.5-prior is obsolete. Memory: [[local-venv-setup]].
+
+**Thread 1 — RECONCILE DONE.** The Bybit MCP "Failed to connect" was a **~7.4s
+local clock skew** (ccxt `InvalidNonce 10002`), NOT keys/IP. Fix the clock
+(`w32tm /resync`, then restart Claude Code) to restore the MCP; for scripts use
+ccxt `adjustForTimeDifference` + `recvWindow`. Reconciled via read-only ccxt (key
+`rolfbot_dev`, readOnly, IP-whitelisted):
+- **Real equity $298.77, FLAT.** Real net PnL **−$1.23** over the 9-day run —
+  noise, well within the backtest envelope.
+- **Books overstated by +$3.75** (booked +2.52 vs real −1.23), on EVERY symbol
+  (SOL −2.09 worst) = theoretical-fill optimism + zero live funding modeled.
+- Per-bot REAL equity: INJ 122.90, SOL 59.26, ADA 46.05, ETH 40.71, LINK 29.85.
+Memory: [[bybit-clock-skew]].
+
+**Thread 2 — COOLDOWN VALIDATED (passed the bar the prelim couldn't).** Re-ran the
+post-SL same-side re-entry cooldown on the FULL production stack
+(regime+F&G-persist+decay+funding), 3.7y, 5 pairs, walk-forward regimes, 3 windows:
+**K=3 mean Sharpe 1.57→2.53**, positive on all 5 pairs AND all 3 windows
+(ΔSharpe +0.92/+1.04/+0.85), MDD −32%→−27%. Script:
+`research/test_reentry_cooldown_prod.py`; FINDINGS updated. **Not yet implemented
+in bot.py** — next: code it as a config-flagged entry gate + mirror in the
+backtester with a parity check → paper → small live.
+
+**Thread 3 — EXTERNAL-FILL FIX CODED (NOT committed/deployed).** bot.py now books
+autonomous (exchange SL/TP) closes at the REAL fill via a new read-only
+`Exchange.fetch_last_closed_fill()` (falls back to the theoretical price if
+history is unavailable), wired into `close_position` and the resume-flat path
+(which previously dropped PnL entirely). Paper mode byte-for-byte unchanged; 5/5
+reduce-only regression tests (incl. 2 new), exec-parity, and the paper smoke all
+pass. **Changes are in the working tree on `main`, uncommitted** — review →
+branch + PR → deploy.
+
+**Thread 4 — RESUME DECISION: pending user.** See "Open decisions" below.
+
+### Open decisions for the user (2026-06-29)
+1. **Fix the laptop clock** (`w32tm /resync`) — restores the MCP and all Bybit auth.
+2. **Commit + PR the external-fill fix** (Thread 3), then `git pull` + rebuild on EC2.
+3. **Implement the cooldown** (Thread 2) → paper-trade before any live use.
+4. **Resume now vs stay stopped**; optionally correct each bot's booked equity to
+   the per-bot REAL values above before resuming (minor: $3.75 / ~1.25% total).
+
+---
+### (Prior 2026-06-28 session — historical; shipped items are in git history)
 
 ### Current state
 - **Bots are STOPPED** (`portfolio.sh down`). **No open positions** — the last

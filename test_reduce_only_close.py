@@ -45,6 +45,8 @@ class FakeCcxt:
     def __init__(self, net_position=0.0):
         self.position = float(net_position)
         self.orders = []  # every attempt recorded, even rejected ones
+        self.markets = {"_": 1}      # truthy so _load_market skips load_markets
+        self.closed_fill = None      # set to a closed-PnL row to exercise real-fill booking
 
     def _order(self, side, symbol, qty, params):
         reduce_only = bool((params or {}).get("reduceOnly"))
@@ -78,6 +80,12 @@ class FakeCcxt:
             return [{"symbol": sym, "contracts": 0, "side": ""}]
         return [{"symbol": sym, "contracts": abs(self.position),
                  "side": "long" if self.position > 0 else "short"}]
+
+    def market(self, symbol):
+        return {"id": "ETHUSDT", "limits": {}}
+
+    def private_get_v5_position_closed_pnl(self, params=None):
+        return {"result": {"list": [self.closed_fill] if self.closed_fill else []}}
 
 
 def _make_bot(net_on_exchange):
@@ -130,8 +138,54 @@ def test_short_state_flat_exchange_does_not_reopen_long():
     print("PASS: short state + flat exchange -> no reopen")
 
 
+def test_external_close_books_real_fill():
+    """Live autonomous close: when the exchange's SL fired, the close must be
+    booked at the REAL fill from closed-PnL history, NOT the theoretical SL
+    price (a market stop slips past its trigger). This is the fix for the
+    booked-vs-exchange equity gap."""
+    b, fake = _make_bot(net_on_exchange=0.0)
+    # Theoretical SL is 1710.50, but the stop really filled WORSE, at 1705.20.
+    fake.closed_fill = {"qty": "0.04", "avgExitPrice": "1705.20",
+                        "closedPnl": "-1.11", "updatedTime": "1000"}
+    b.state.position = botmod.Position(side=1, qty=0.04, entry_px=1732.91,
+                                       sl=1710.50, tp=1771.09, open_ts=1,
+                                       notional=69.32)
+    eq0 = b.state.equity
+    b.close_position(exit_px_hint=1710.50, reason="sl-external")
+    booked = b.state.equity - eq0
+    real_gross = (1705.20 - 1732.91) * 0.04          # -1.1084  (real fill)
+    theo_gross = (1710.50 - 1732.91) * 0.04          # -0.8964  (theoretical stop)
+    assert abs(booked - real_gross) < 0.15, \
+        f"expected booking near real fill ({real_gross:.3f}), got {booked:.3f}"
+    assert booked < theo_gross - 0.1, \
+        f"booked {booked:.3f} not meaningfully worse than theoretical {theo_gross:.3f}"
+    assert abs(fake.position) < 1e-9, "must not reopen"
+    assert b.state.position is None
+    print(f"PASS: external close booked at REAL fill (pnl {booked:.3f}, "
+          f"theoretical would book ~{theo_gross:.3f})")
+
+
+def test_external_close_falls_back_when_history_unavailable():
+    """If closed-PnL history is unavailable (closed_fill=None), booking must
+    fall back to the theoretical hint — never crash, never reopen."""
+    b, fake = _make_bot(net_on_exchange=0.0)  # closed_fill stays None
+    b.state.position = botmod.Position(side=1, qty=0.04, entry_px=1732.91,
+                                       sl=1710.50, tp=1771.09, open_ts=1,
+                                       notional=69.32)
+    eq0 = b.state.equity
+    b.close_position(exit_px_hint=1710.50, reason="sl-external")
+    booked = b.state.equity - eq0
+    theo_gross = (1710.50 - 1732.91) * 0.04
+    assert abs(booked - theo_gross) < 0.15, \
+        f"fallback should book ~theoretical ({theo_gross:.3f}), got {booked:.3f}"
+    assert b.state.position is None
+    print("PASS: no closed-PnL -> falls back to theoretical price, no crash")
+
+
 if __name__ == "__main__":
     test_flat_exchange_does_not_reopen()
     test_open_exchange_gets_flattened()
     test_short_state_flat_exchange_does_not_reopen_long()
+    test_external_close_books_real_fill()
+    test_external_close_falls_back_when_history_unavailable()
     print("ALL REDUCE-ONLY REGRESSION TESTS PASSED")
