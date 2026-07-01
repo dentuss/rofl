@@ -20,7 +20,9 @@
 #   - changing TOTAL_EQUITY only re-initializes equity on a FRESH state; use
 #     `down -v` first to apply a new total to running bots.
 #   - PORTFOLIO can also be set in .env. Don't run both portfolios at once:
-#     they share container names for overlapping pairs (INJ, ADA).
+#     they share container names (INJ, ADA, and the rofl-tgcontrol service) AND
+#     the INJ/ADA exchange positions on the one Bybit account. The up-guard below
+#     blocks co-running via the wrapper; the raw `docker compose` path does NOT.
 
 set -euo pipefail
 cd "$(dirname "$0")"

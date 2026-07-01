@@ -39,6 +39,7 @@ x-bot: &bot-defaults
     API_PASSPHRASE: ${API_PASSPHRASE:-}
     POLL_SECONDS: ${POLL_SECONDS:-30}
     STRATEGY_PRESET: adaptive_bidir          # symbol-agnostic bidir preset
+    COOLDOWN_BARS: ${COOLDOWN_BARS:-3}       # post-SL same-side re-entry block (bars/hours)
     TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
     TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
   logging:

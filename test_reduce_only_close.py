@@ -15,6 +15,9 @@ Run:  python test_reduce_only_close.py
 """
 import os
 import tempfile
+import time
+
+import pandas as pd
 
 # BotConfig reads env as dataclass defaults at import time, so set before import.
 _TMP = tempfile.mkdtemp(prefix="rofl_ro_test_")
@@ -182,10 +185,97 @@ def test_external_close_falls_back_when_history_unavailable():
     print("PASS: no closed-PnL -> falls back to theoretical price, no crash")
 
 
+def test_resume_close_arms_cooldown_from_fill_ts():
+    """Fix #1: an SL that fired while the bot was DOWN must arm the same-side
+    re-entry cooldown on resume, keyed on the REAL fill's timestamp (not skipped
+    as before). A recent fill => cooldown still active."""
+    b, fake = _make_bot(net_on_exchange=0.0)
+    assert b.cfg.cooldown_bars > 0, "cooldown must be on for this test"
+    bar_sec = botmod.Exchange.TF_SECONDS.get(b.cfg.timeframe, 3600)
+    now = int(time.time())
+    updated_ms = (now - bar_sec) * 1000            # stop filled ~1 bar ago
+    fake.closed_fill = {"qty": "0.04", "avgExitPrice": "1705.20",
+                        "closedPnl": "-1.11", "updatedTime": str(updated_ms)}
+    b.state.position = botmod.Position(side=1, qty=0.04, entry_px=1732.91,
+                                       sl=1710.50, tp=1771.09, open_ts=1, notional=69.32)
+    booked = b._book_resume_autonomous_close(b.state.position)
+    assert booked is True, "should have booked the real close"
+    assert b.state.position is None, "position must be cleared"
+    snap = (updated_ms // 1000) // bar_sec * bar_sec
+    expected = snap + b.cfg.cooldown_bars * bar_sec
+    assert b.state.block_long_until_ts == expected, \
+        f"cooldown until {b.state.block_long_until_ts} != expected {expected}"
+    assert b.state.block_long_until_ts > now, "recent stop => cooldown still active"
+    print("PASS: resume books real close AND arms same-side cooldown from fill ts")
+
+
+def test_resume_stale_fill_expires_cooldown():
+    """Fix #1 corollary: a stop that fired long ago yields an already-expired
+    cooldown (blocks nothing) — the correct behaviour the old None-bar_ts path
+    approximated but couldn't distinguish from a fresh stop."""
+    b, fake = _make_bot(net_on_exchange=0.0)
+    now = int(time.time())
+    updated_ms = (now - 40 * 86400) * 1000          # 40 days ago
+    fake.closed_fill = {"qty": "0.04", "avgExitPrice": "1705.20",
+                        "closedPnl": "-1.11", "updatedTime": str(updated_ms)}
+    b.state.position = botmod.Position(side=1, qty=0.04, entry_px=1732.91,
+                                       sl=1710.50, tp=1771.09, open_ts=1, notional=69.32)
+    assert b._book_resume_autonomous_close(b.state.position) is True
+    assert b.state.block_long_until_ts < now, "stale stop must not block re-entry"
+    print("PASS: stale resume stop leaves cooldown expired (no spurious block)")
+
+
+def test_ambiguous_external_upgraded_to_sl_arms_cooldown():
+    """Fix #2: reconcile finds the exchange flat but the fallback bar's H/L does
+    NOT confirm the SL touch (spot-vs-perp wick). If the real closed-PnL fill
+    landed nearer the stop, classify as sl-external so the cooldown still arms."""
+    b, fake = _make_bot(net_on_exchange=0.0)
+    bar_sec = botmod.Exchange.TF_SECONDS.get(b.cfg.timeframe, 3600)
+    bar_ts = int(time.time()) // bar_sec * bar_sec
+    # Real fill (1709.00) is right at the stop (1710.50), far from TP (1771.09).
+    fake.closed_fill = {"qty": "0.04", "avgExitPrice": "1709.00",
+                        "closedPnl": "-0.96", "updatedTime": str(bar_ts * 1000)}
+    b.state.position = botmod.Position(side=1, qty=0.04, entry_px=1732.91,
+                                       sl=1710.50, tp=1771.09, open_ts=1, notional=69.32)
+    # Bar H/L straddle neither SL nor TP -> confirmed branch would say "external".
+    last_bar = pd.Series({"high": 1745.0, "low": 1735.0, "close": 1740.0})
+    acted = b._reconcile_position_with_exchange(last_bar, bar_ts=bar_ts)
+    assert acted is True and b.state.position is None
+    assert b.state.block_long_until_ts == bar_ts + b.cfg.cooldown_bars * bar_sec, \
+        "ambiguous close near the stop must arm the same-side cooldown"
+    print("PASS: ambiguous external near stop -> sl-external -> cooldown armed")
+
+
+def test_bot_initiated_close_books_real_fill():
+    """Fix #3: a bot-initiated live close (exchange still holds it, reduce-only
+    succeeds) must book at the REAL fill from closed-PnL history, not the
+    bar-close hint or the ccxt order's placeholder price."""
+    b, fake = _make_bot(net_on_exchange=0.04)     # exchange still holds -> order fills
+    fake.closed_fill = {"qty": "0.04", "avgExitPrice": "1770.00",
+                        "closedPnl": "1.40", "updatedTime": str(int(time.time()) * 1000)}
+    b.state.position = botmod.Position(side=1, qty=0.04, entry_px=1732.91,
+                                       sl=1710.50, tp=1771.09, open_ts=1, notional=69.32)
+    eq0 = b.state.equity
+    b.close_position(exit_px_hint=1750.0, reason="time")   # hint deliberately != real fill
+    booked = b.state.equity - eq0
+    real_gross = (1770.00 - 1732.91) * 0.04       # +1.4836 at the real fill
+    hint_gross = (1750.00 - 1732.91) * 0.04       # +0.6836 at the bar-close hint
+    assert abs(fake.position) < 1e-9, "must flatten via reduce-only"
+    assert booked > (hint_gross + real_gross) / 2, \
+        f"booked {booked:.3f} should track real fill (~{real_gross:.3f}), not hint (~{hint_gross:.3f})"
+    assert b.state.position is None
+    print(f"PASS: bot-initiated close booked at REAL fill (pnl {booked:.3f}, "
+          f"hint would book ~{hint_gross:.3f})")
+
+
 if __name__ == "__main__":
     test_flat_exchange_does_not_reopen()
     test_open_exchange_gets_flattened()
     test_short_state_flat_exchange_does_not_reopen_long()
     test_external_close_books_real_fill()
     test_external_close_falls_back_when_history_unavailable()
+    test_resume_close_arms_cooldown_from_fill_ts()
+    test_resume_stale_fill_expires_cooldown()
+    test_ambiguous_external_upgraded_to_sl_arms_cooldown()
+    test_bot_initiated_close_books_real_fill()
     print("ALL REDUCE-ONLY REGRESSION TESTS PASSED")
