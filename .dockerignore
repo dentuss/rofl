@@ -11,3 +11,13 @@ bot*.log
 README.md
 *.md
 events-*.jsonl
+# Never let secrets / local-only dirs into the build context (a future
+# `COPY . .` must not be able to bake these into the image).
+*.pem
+*.ppk
+.venv/
+venv/
+archives/
+.idea/
+.mcp.json
+.claude/

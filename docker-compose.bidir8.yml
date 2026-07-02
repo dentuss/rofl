@@ -1,6 +1,15 @@
 # 8-pair BIDIR portfolio — equal weight, narrative-diversified.
 #
-# Selection rationale (research/expand_universe.py + portfolio_construction.py):
+# *** STATUS 2026-07-02: ON HOLD — NOT the current go-live. The Bybit-perp OOS
+# *** robustness study (research/portfolio_robustness.py) found this basket's
+# *** edge overfit: IS monthly Sharpe 4.60 decays to 2.70 OOS, worst month
+# *** -9.6%. Production is the SOFT5 5-pair (deploy/LIVE.md §0). Everything
+# *** below stays wired (cooldown, tg-control) if fresh OOS evidence reverses
+# *** the call.
+#
+# Selection rationale (research/expand_universe.py + portfolio_construction.py;
+# NOTE: these are the older KuCoin in-sample numbers, superseded by the OOS
+# study above):
 # 20 of 33 swept pairs clear Sharpe >= 1.1 with the production strategy, and
 # best-N analysis peaks around 7-8 equal-weight pairs (Sharpe ~2.4, worst
 # month ~-11% vs -16% on 3 pairs). Pairs chosen for narrative diversity, not
@@ -14,12 +23,14 @@
 # Run via the wrapper (computes the split from TOTAL_EQUITY). Use `sudo -E` so
 # the PORTFOLIO/TOTAL_EQUITY vars survive into the wrapper — WITHOUT -E, sudo
 # strips them and the wrapper silently falls back to the 5-pair at $100:
-#   PORTFOLIO=8 TOTAL_EQUITY=2300 sudo -E ./portfolio.sh up -d --build
+#   PORTFOLIO=8 TOTAL_EQUITY=<total> sudo -E ./portfolio.sh up -d --build
 #   PORTFOLIO=8 sudo -E ./portfolio.sh status
-# Most robust: put PORTFOLIO=8 and TOTAL_EQUITY=2300 in .env (then plain sudo is
-# fine — the wrapper reads them from the file). Bring the 5-pair fully DOWN first
-# (they share the rofl-inj/rofl-ada/rofl-tgcontrol names and the INJ/ADA exchange
-#  positions — never run both portfolios at once).
+# Most robust: put PORTFOLIO=8 and TOTAL_EQUITY in .env (then plain sudo is
+# fine — the wrapper reads them from the file). REMOVE any 5-pair *_WEIGHT
+# lines from .env first: INJ_WEIGHT/ADA_WEIGHT are read by BOTH portfolios and
+# the wrapper aborts if weights don't sum to 1.0. Bring the 5-pair fully DOWN
+# first (they share the rofl-inj/rofl-ada/rofl-tgcontrol names and the INJ/ADA
+# exchange positions — never run both portfolios at once).
 
 x-bot: &bot-defaults
   build: .
@@ -40,6 +51,7 @@ x-bot: &bot-defaults
     POLL_SECONDS: ${POLL_SECONDS:-30}
     STRATEGY_PRESET: adaptive_bidir
     COOLDOWN_BARS: ${COOLDOWN_BARS:-3}       # post-SL same-side re-entry block (bars/hours)
+    TRUST_STATE: ${TRUST_STATE:-}            # =1 overrides the STATE/SLICE preflight halt
     TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
     TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
   logging:

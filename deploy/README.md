@@ -117,7 +117,7 @@ The deepest breached tier wins; existing positions always run their own stops. O
 
 ### Multi-pair bidir portfolio
 
-Runs the production bidir preset on 5 validated pairs simultaneously (INJ 40% / SOL 20% / ADA 15% / ETH 15% / LINK 10%), each as an independent bot with its own capital slice and state. Diversification's payoff is large because the bidir strategy **decorrelates** the pairs (avg pairwise monthly correlation just 0.16 — when one shorts a bear another longs a bull):
+Runs the production bidir preset on 5 validated pairs simultaneously, each as an independent bot with its own capital slice and state. **Production weighting (2026-07-02) is SOFT5 — INJ 25% / SOL, ADA, ETH, LINK 18.75% each** (INJ concentration capped; set via `*_WEIGHT` in `.env`, see `deploy/LIVE.md` §2). The wrapper's built-in default is the older `inj_heavy` 40/20/15/15/10. Diversification's payoff is large because the bidir strategy **decorrelates** the pairs (avg pairwise monthly correlation just 0.16 — when one shorts a bear another longs a bull):
 
 | Setup | CAGR | MDD | Sharpe | Worst month | Monthly win rate |
 |---|---|---|---|---|---|
@@ -142,18 +142,22 @@ sudo ./portfolio.sh down -v            # stop AND reset equity to the split
 PORTFOLIO=8 sudo -E ./portfolio.sh up -d --build
 PORTFOLIO=8 sudo -E ./portfolio.sh status
 ```
-Runs INJ, AVAX, NEAR, AAVE, GRT, RUNE, DOGE, ADA at 12.5% each — the
-diversification sweet spot from the 33-pair universe sweep (best-N Sharpe
-peaks at ~7-8 equal-weight pairs: ~2.4 vs 2.16 for the 5-pair, worst month
-~−11%, MDD ~−19%). Pairs were chosen for narrative diversity (L1s / DeFi /
-meme), not top-N Sharpe, because per-window rankings don't persist.
+Runs INJ, AVAX, NEAR, AAVE, GRT, RUNE, DOGE, ADA at 12.5% each.
+**ON HOLD (2026-07-02):** the older sweep numbers (best-N Sharpe ~2.4 at 7-8
+pairs, worst month ~−11%) were KuCoin in-sample; the Bybit-perp OOS robustness
+study (`research/portfolio_robustness.py`) found the basket's edge overfit
+(IS Sharpe 4.60 → OOS 2.70, worst month −9.6%) — production stays on the
+SOFT5 5-pair. Pairs were chosen for narrative diversity (L1s / DeFi / meme),
+not top-N Sharpe, because per-window rankings don't persist.
 **Don't run both portfolios simultaneously** — they share container names
-for the overlapping pairs (INJ, ADA), and 13 bots would exhaust a t4g.small.
+(INJ, ADA, tg-control), the INJ/ADA exchange positions, and 13 bots would
+exhaust a t4g.small.
 You only set **`TOTAL_EQUITY`**; the wrapper computes each bot's slice
 (`INJ_EQUITY`…`LINK_EQUITY`) from the weights and passes them to compose.
-The weights themselves are overridable (`INJ_WEIGHT` etc.) but default to the
-validated `inj_heavy` split. Docker Compose can't do arithmetic in YAML, which
-is why the split lives in the wrapper.
+The weights are overridable (`INJ_WEIGHT` etc. — production SOFT5 does exactly
+this) and default to the older `inj_heavy` split; the wrapper aborts if the
+overridden weights don't sum to 1.0. Docker Compose can't do arithmetic in
+YAML, which is why the split lives in the wrapper.
 
 > **Changing the total takes effect only on a fresh state.** Each bot persists
 > its equity in a named volume; `up` after a plain `down` keeps the old equity.

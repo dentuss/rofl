@@ -7,20 +7,24 @@ some are not.
 
 ## 0. Decide which portfolio
 
-Quick rule for a small first deposit:
+**Production allocation (2026-07-02): 5-pair SOFT5 — INJ 25 / SOL 18.75 /
+ADA 18.75 / ETH 18.75 / LINK 18.75.** The Bybit-perp robustness study
+(`research/portfolio_robustness.py` + `portfolio_softened.py`) found:
+
+- the **8-pair's edge is overfit** — in-sample Sharpe 4.60 decays to 2.70
+  out-of-sample, with the worst tails of any book (worst month −9.6%). It is
+  **on hold**; do not deploy it on the strength of the older KuCoin numbers.
+- the original `inj_heavy` (INJ 40) leans on a single-name concentration the
+  backtest rewards but can't risk-price forward;
+- **SOFT5** keeps the 5-name selection (97th pct vs the random-5 null OOS),
+  posts the best monthly Sharpe (3.81) and consistency (91% positive months),
+  and caps the INJ concentration.
 
 | Deposit | Recommended | Why |
 |---|---|---|
-| **$100 – $400** | **5-pair `inj_heavy`** | Larger per-bot slice ($40 INJ on $100) keeps trade notionals comfortably above exchange minimums. Lower exchange-fee drag. |
-| $500 – $2000 | Either works | 8-pair starts giving its diversification benefit clearly above ~$600. |
-| $2000+ | **8-pair equal-weight** | Diversification fully expressed; worst-month profile noticeably calmer. |
-
-**For your $300 start: use the 5-pair (`inj_heavy`).** Each bot gets
-$120/$60/$45/$45/$30. At 2% risk and an avg ~5% ATR-stop, position
-notionals are ~$20–$50 — well above Bybit's typical $5–$10 minimums. The
-8-pair would put each bot at $37.50 and some pairs (ETH, AAVE, GRT) have
-higher min-cost; you'd hit "below exchange min cost" rejections on small
-moves.
+| $100 – $400 | 5-pair (SOFT5 weights) | Per-bot slices stay above exchange minimums. |
+| **$400+** | **5-pair SOFT5** | Best OOS-robust risk-adjusted book; INJ de-concentrated. |
+| — | 8-pair | On hold: OOS-overfit (see above). Revisit only with fresh OOS evidence. |
 
 ## 1. Bybit account setup (one-time)
 
@@ -56,11 +60,20 @@ Then create the live `.env` (do NOT keep the paper one):
 # WIPE the paper state — paper-mode equity/peak/positions must NOT carry into live.
 sudo ./portfolio.sh down -v   # (run with PORTFOLIO=8 too if you tried that)
 
-# Write the live env file
+# Write the live env file. Set TOTAL_EQUITY to YOUR actual Bybit balance.
 cat > .env <<'EOF'
 MODE=live
 EXCHANGE=bybit
-TOTAL_EQUITY=300
+PORTFOLIO=5
+TOTAL_EQUITY=2300
+
+# SOFT5 production weights (INJ capped at 25%; without these lines the wrapper
+# defaults to the old inj_heavy 40/20/15/15/10 split)
+INJ_WEIGHT=0.25
+SOL_WEIGHT=0.1875
+ADA_WEIGHT=0.1875
+ETH_WEIGHT=0.1875
+LINK_WEIGHT=0.1875
 
 API_KEY=your_bybit_key_here
 API_SECRET=your_bybit_secret_here
@@ -111,9 +124,14 @@ curl -s "https://api.telegram.org/bot${TG_TOKEN}/getUpdates" | jq '.result[-1].m
 sudo -E ./portfolio.sh up -d --build
 ```
 
-The bot will run its **own preflight**:
+The wrapper prints the computed split BEFORE starting — **check it**. For
+SOFT5 at $2300 it must read `INJ 575.0  SOL 431.25  ADA 431.25  ETH 431.25
+LINK 431.25`. If it shows the 40/20/15/15/10 amounts, your `*_WEIGHT` lines
+didn't load — stop and fix `.env`.
+
+The bot will then run its **own preflight**:
 - `LIVE balance check OK: NNN.NN USDT on exchange` — keys work.
-- `STATE/BALANCE MISMATCH` → **the bot refused to start** because paper
+- `STATE/SLICE MISMATCH` → **the bot refused to start** because paper
   state survived into live. Run `sudo ./portfolio.sh down -v` then retry.
   (To override, set `TRUST_STATE=1` in `.env` — but really, just wipe.)
 
@@ -121,8 +139,8 @@ Within ~60s:
 ```bash
 sudo ./portfolio.sh status
 ```
-Expect all 5 bots `healthy`, equity equal to the splits (~120/60/45/45/30),
-all flat.
+Expect all 5 bots `healthy`, equity equal to the splits (575/431.25×4 at
+$2300), all flat.
 
 ## 5. What to expect — the first 24-72 hours
 
@@ -160,7 +178,7 @@ notifier (not necessarily the bot).
 | **Markets going crazy, want everything OUT** | On Bybit UI: Trading → Close All Positions. Then on box: `sudo ./portfolio.sh down`. State is preserved; you can resume later. |
 | **A bot logs `ORPHAN POSITION`** | The bot already tried to force-close. Check Bybit UI; if a position remains, close it manually. The bot will stop trading that pair until you `restart` it. |
 | **Equity divergence (bot equity ≠ Bybit balance)** | `sudo ./portfolio.sh down`, manually reconcile (record true balance), then either `down -v` + restart fresh OR set `TRUST_STATE=1` and accept the drift will persist. |
-| **Bot won't start: `STATE/BALANCE MISMATCH`** | Run `sudo ./portfolio.sh down -v` and start again — wipes state to match exchange balance. |
+| **Bot won't start: `STATE/SLICE MISMATCH`** | Run `sudo ./portfolio.sh down -v` and start again — wipes state to match exchange balance. |
 | **EC2 instance becomes unreachable** | Stop/start via AWS console (state survives), then `sudo ./portfolio.sh status` to verify everything resumed. With `restart: unless-stopped` the bots auto-resume. |
 
 ## 8. Scaling up later
@@ -172,10 +190,14 @@ broadly tracks paper expectations, you can:
    delta on Bybit. Then `down -v && up -d --build` (wiping state and
    re-initializing at the new amount). Note: this resets PnL accounting —
    archive first.
-2. **Switch to 8-pair.** Same procedure: archive, `down -v`, set
-   `PORTFOLIO=8` in `.env`, deposit more if needed (8-pair really wants
-   ≥$600 to clear min-cost on every pair), and bring up. This works best
-   on `t4g.medium` (4GB RAM); `t4g.small` will OOM with 8 bots.
+2. **8-pair: ON HOLD** (2026-07-02). The Bybit-perp OOS study found its edge
+   overfit (IS Sharpe 4.60 → OOS 2.70, worst month −9.6%). Everything is wired
+   (`docker-compose.bidir8.yml`, cooldown, tg-control) if fresh OOS evidence
+   ever reverses the call, but do not switch on the old KuCoin numbers. If you
+   do run it: archive, `down -v`, set `PORTFOLIO=8` in `.env` and REMOVE the
+   5-pair `*_WEIGHT` lines (INJ/ADA weight overrides leak across portfolios —
+   the wrapper aborts if the weights don't sum to 1.0). Needs `t4g.medium`;
+   `t4g.small` will OOM with 8 bots.
 
 ## 9. The honest risks (read this once)
 

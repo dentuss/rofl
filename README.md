@@ -6,10 +6,12 @@ deepens. Runs in **paper mode by default** — no keys, real market data — and
 goes live on Bybit (or KuCoin/OKX) with a one-line config change.
 
 > **Status:** validated on 33 pairs (20 viable) over 4.6–8.7 years of history.
-> The production pair (INJ) backtests at ~+147% CAGR / −27% max drawdown /
-> Sharpe 1.91 single-pair, improving to Sharpe ~2.4 / −19% drawdown / worst
-> month ~−11% as an 8-pair equal-weight portfolio. Backtests are in-sample —
-> treat them as an upper bound and paper-trade before going live.
+> Production (2026-07-02) is the **SOFT5 5-pair** (INJ 25 / SOL, ADA, ETH,
+> LINK 18.75) with the post-SL re-entry cooldown — on Bybit-perp data it holds
+> monthly Sharpe ~3.0 out-of-sample. The 8-pair equal-weight basket is **on
+> hold**: its older in-sample edge (Sharpe ~2.4) did not survive the OOS
+> robustness check (`research/portfolio_robustness.py`). Backtests are an
+> upper bound — paper-trade before going live.
 
 ---
 
@@ -89,10 +91,11 @@ sudo ./portfolio.sh status                                  # per-bot health/equ
 sudo ./portfolio.sh archive                                 # snapshot to archives/ for the record
 ```
 
-| Portfolio | Pairs | Backtest (4.6y) |
+| Portfolio | Pairs | Status |
 |---|---|---|
-| **5-pair** `inj_heavy` (40/20/15/15/10) | INJ, SOL, ADA, ETH, LINK | Sharpe 2.16 / MDD −18% / worst mo −7% |
-| **8-pair** equal-weight | INJ, AVAX, NEAR, AAVE, GRT, RUNE, DOGE, ADA | Sharpe ~2.4 / MDD −19% / worst mo −11% |
+| **5-pair SOFT5** (25/18.75×4) — **production** | INJ, SOL, ADA, ETH, LINK | Bybit-perp, cooldown on: Sharpe(mo) 3.81, OOS 3.01, 91% pos months (`research/portfolio_softened.py`) |
+| 5-pair `inj_heavy` (40/20/15/15/10) — superseded | INJ, SOL, ADA, ETH, LINK | Wrapper default; production overrides via `*_WEIGHT` in `.env` (caps the INJ concentration) |
+| 8-pair equal-weight — **on hold** | INJ, AVAX, NEAR, AAVE, GRT, RUNE, DOGE, ADA | OOS-overfit: IS Sharpe 4.60 → OOS 2.70, worst mo −9.6% (`research/portfolio_robustness.py`) |
 
 The bidirectional strategy decorrelates the pairs (avg pairwise monthly correlation 0.16) so diversification actually delivers — see [`research/FINDINGS.md`](research/FINDINGS.md) for the full universe sweep and rejected ideas.
 

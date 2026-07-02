@@ -10,8 +10,9 @@
 
 This is a **crypto trading bot** in production on Bybit USDT perpetuals.
 Strategy is a bidirectional trend-follower with regime + sentiment filtering.
-Validated on 33 pairs across 4–9 years of history. Currently **live on a
-real $300** in a 5-pair portfolio on a t4g.medium EC2 box.
+Validated on 33 pairs across 4–9 years of history. Runs a 5-pair portfolio
+on a t4g.medium EC2 box (stopped 2026-07-01, pending the ~$2300 **SOFT5**
+redeploy — see §0.5).
 
 - **Repo**: `dentuss/rofl`, work on branch `main` (squash-merge PRs only)
 - **Live setup**: 5 docker containers (`rofl-inj`, `rofl-sol`, `rofl-ada`, `rofl-eth`, `rofl-link`)
@@ -25,7 +26,36 @@ shipping anything.
 
 ---
 
-## 0.5 ⏯ CONTINUE FROM HERE — handoff @ 2026-06-29 (read this first)
+## 0.5 ⏯ CONTINUE FROM HERE — handoff @ 2026-07-02 (read this first)
+
+> **This block supersedes the 2026-06-29 block below it** (kept for history;
+> several of its "next steps" have since SHIPPED — do not redo them).
+
+**Everything from the 06-29 threads is shipped and merged/PR'd:**
+- **Cooldown IS implemented** in bot.py (`COOLDOWN_BARS`, default 3) + both
+  backtest engines + both composes; exec-parity locked; it fired correctly in
+  live during the 06-29→30 dip. (The 06-29 block's "Not yet implemented in
+  bot.py" is obsolete.)
+- **External-fill fix is merged** (PR #29), extended on the current branch to
+  bot-initiated closes and a restart-robust cooldown (an SL that fires while
+  the bot is DOWN now arms the cooldown from the real fill's timestamp).
+- **Branch `feat/8pair-golive-cooldown-fixes`** carries: those bot.py fixes,
+  8-pair wiring (cooldown env, tg-control, runbooks), the weight-sum guard +
+  TRUST_STATE passthrough, and three research studies.
+
+**THE DECISION (2026-07-02): deploy SOFT5 — 5-pair at INJ 25 / SOL, ADA, ETH,
+LINK 18.75 each, TOTAL_EQUITY ≈ $2300.** Bybit-perp OOS robustness study
+(`research/portfolio_robustness.py`, `portfolio_softened.py`, random-5/8 nulls):
+the 8-pair's edge is OOS-overfit (IS Sharpe 4.60 → OOS 2.70, worst month −9.6%)
+→ **8-pair ON HOLD**; the 5-name selection persists OOS (97th pct vs random-5
+null); SOFT5 caps the INJ-40% concentration with OOS parity to inj_heavy.
+Deploy steps + the exact `.env` block: `deploy/LIVE.md` §0/§2. Bots stopped
+2026-07-01 (~$293.76 booked; archive `archives/run_5pair_2026-07-01_094018`);
+the new deposit brings the account to ~$2300.
+
+---
+
+### (Prior) handoff @ 2026-06-29
 
 > Written when the session moved to terminal Claude Code on the local repo.
 > The numbered sections below are the durable onboarding; THIS block is the

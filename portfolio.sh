@@ -3,8 +3,13 @@
 # bots by weight, so you only set TOTAL_EQUITY (not per-pair vars).
 #
 # Two portfolios are available:
-#   PORTFOLIO=5 (default)  inj_heavy:   INJ 40 / SOL 20 / ADA 15 / ETH 15 / LINK 10
-#   PORTFOLIO=8            equal-weight: INJ AVAX NEAR AAVE GRT RUNE DOGE ADA (12.5 each)
+#   PORTFOLIO=5 (default)  weights default to inj_heavy (INJ 40 / SOL 20 / ADA 15
+#                          / ETH 15 / LINK 10). PRODUCTION runs the SOFT5 override
+#                          via .env: INJ_WEIGHT=0.25 and SOL/ADA/ETH/LINK 0.1875
+#                          each (INJ concentration capped — see deploy/LIVE.md §0).
+#   PORTFOLIO=8            equal-weight: INJ AVAX NEAR AAVE GRT RUNE DOGE ADA
+#                          (12.5 each). ON HOLD 2026-07-02: edge is OOS-overfit
+#                          (research/portfolio_robustness.py).
 #
 # Usage:
 #   sudo ./portfolio.sh up -d --build              # start 5-pair (computes split)
@@ -62,6 +67,20 @@ else
 fi
 
 calc() { python3 -c "print(round($1 * $2, 2))"; }
+
+# Guard: weights must sum to 1.0 (fail-closed — any python error also aborts).
+# Catches typo'd .env overrides AND the cross-portfolio footgun: INJ_WEIGHT and
+# ADA_WEIGHT are read by BOTH portfolios, so 5-pair weight overrides left in
+# .env leak into a PORTFOLIO=8 launch and would over-allocate the account.
+WSUM="$(python3 -c "print(round($(IFS=+; echo "${WEIGHTS[*]}"), 6))")" || {
+    echo "ERROR: could not compute weight sum (bad *_WEIGHT value in .env?)"; exit 1; }
+if ! python3 -c "import sys; sys.exit(0 if abs($WSUM - 1.0) <= 0.001 else 1)"; then
+    echo "ERROR: ${PORTFOLIO}-pair weights sum to ${WSUM}, not 1.0 — check the"
+    echo "       *_WEIGHT overrides in .env (note INJ_WEIGHT/ADA_WEIGHT are shared"
+    echo "       between the 5-pair and 8-pair configs)."
+    exit 1
+fi
+
 for bot in "${BOTS[@]}"; do
     var="$(echo "$bot" | tr '[:lower:]' '[:upper:]')_EQUITY"
     export "$var"="$(calc "$TOTAL_EQUITY" "${WEIGHTS[$bot]}")"
