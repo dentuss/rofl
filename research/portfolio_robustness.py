@@ -10,6 +10,11 @@ Bybit and hourly-Sharpe caveats. Three things the headline compare didn't do:
      SAME candidate pool the live 8 were selected from, and report where the
      chosen 8 ranks. A ~50th-pct rank means "a broad basket works" (robust); a
      ~95th-pct rank means the specific selection is doing the lifting (overfit).
+  4. RANDOM-5 NULL — the same test at basket size 5, so the 5-pair SELECTION is
+     judged against a like-for-like null (the panel flagged that ranking a
+     5-basket inside an 8-basket distribution is not a fair selection test).
+     Scores the chosen 5 names EQUAL-WEIGHT (pure selection effect) plus the
+     actual weighted ORIG5 (inj_heavy) and SOFT5 (INJ-capped) books.
 
 Also reports MONTHLY-resampled Sharpe alongside the hourly one (the audit flagged
 sqrt(24*365) on autocorrelated hourly marks as inflated) — monthly is the honest
@@ -43,6 +48,8 @@ from research.test_reentry_cooldown_prod import (
 
 FIVE = {"INJ-USDT": .40, "SOL-USDT": .20, "ADA-USDT": .15,
         "ETH-USDT": .15, "LINK-USDT": .10}
+SOFT5 = {"INJ-USDT": .25, "SOL-USDT": .1875, "ADA-USDT": .1875,
+         "ETH-USDT": .1875, "LINK-USDT": .1875}
 EIGHT_PAIRS = ["INJ-USDT", "AVAX-USDT", "NEAR-USDT", "AAVE-USDT",
                "GRT-USDT", "RUNE-USDT", "DOGE-USDT", "ADA-USDT"]
 # The candidate POOL the 8 were selected from (expand_universe universe, the
@@ -211,6 +218,36 @@ def main():
     print(f"  CHOSEN 8-pair  OOS  monthly-Sharpe {chosen_oos:.2f}  -> percentile {pct_rank(oos_shm, chosen_oos):.0f}")
     print(f"  5-pair (ref)   full monthly-Sharpe {five_full:.2f}  -> percentile {pct_rank(full_shm, five_full):.0f}")
     print(f"  5-pair (ref)   OOS  monthly-Sharpe {five_oos:.2f}  -> percentile {pct_rank(oos_shm, five_oos):.0f}")
+
+    # ---- random-5 null (like-for-like selection test for the 5-pair) ----
+    print("\n" + "=" * 88)
+    print(f"RANDOM 5-BASKET NULL   {R} draws (equal-weight, size 5) from the same pool")
+    print("=" * 88)
+    full5, oos5 = [], []
+    for _ in range(R):
+        pick = list(rng.choice(eligible, size=5, replace=False))
+        w = {p: 1 / 5 for p in pick}
+        full5.append(curve_stats(build(pair_eq, w, idx, TOTAL_EQUITY))["sh_m"])
+        oos5.append(curve_stats(build(pair_eq, w, oos_idx, TOTAL_EQUITY))["sh_m"])
+    full5 = np.array(full5); oos5 = np.array(oos5)
+    print(f"\n  random 5-basket monthly-Sharpe (full window):  "
+          f"p5 {np.percentile(full5,5):.2f}  p50 {np.percentile(full5,50):.2f}  "
+          f"p95 {np.percentile(full5,95):.2f}  mean {full5.mean():.2f}")
+    print(f"  random 5-basket monthly-Sharpe (OOS):          "
+          f"p5 {np.percentile(oos5,5):.2f}  p50 {np.percentile(oos5,50):.2f}  "
+          f"p95 {np.percentile(oos5,95):.2f}  mean {oos5.mean():.2f}")
+    # Pure selection effect: the chosen 5 NAMES, equal-weight (same form as the null).
+    eq5 = {p: 1 / 5 for p in FIVE}
+    books = {"chosen-5 eq-wt": eq5, "ORIG5 (inj_heavy)": FIVE, "SOFT5 (INJ25)": SOFT5}
+    print()
+    for name, w in books.items():
+        f_sh = curve_stats(build(pair_eq, w, idx, TOTAL_EQUITY))["sh_m"]
+        o_sh = curve_stats(build(pair_eq, w, oos_idx, TOTAL_EQUITY))["sh_m"]
+        print(f"  {name:18s} full {f_sh:.2f} -> pct {pct_rank(full5, f_sh):3.0f}   "
+              f"OOS {o_sh:.2f} -> pct {pct_rank(oos5, o_sh):3.0f}")
+    print("\n  (chosen-5 eq-wt is the LIKE-FOR-LIKE selection test: same size, same "
+          "weighting form as the null.\n   High pct on the eq-wt row = the NAME "
+          "selection itself carries signal; weighted rows show the full books.)")
 
     print("\n" + "=" * 88)
     print("VERDICT")
