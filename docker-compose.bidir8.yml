@@ -1,6 +1,15 @@
 # 8-pair BIDIR portfolio — equal weight, narrative-diversified.
 #
-# Selection rationale (research/expand_universe.py + portfolio_construction.py):
+# *** STATUS 2026-07-02: ON HOLD — NOT the current go-live. The Bybit-perp OOS
+# *** robustness study (research/portfolio_robustness.py) found this basket's
+# *** edge overfit: IS monthly Sharpe 4.60 decays to 2.70 OOS, worst month
+# *** -9.6%. Production is the SOFT5 5-pair (deploy/LIVE.md §0). Everything
+# *** below stays wired (cooldown, tg-control) if fresh OOS evidence reverses
+# *** the call.
+#
+# Selection rationale (research/expand_universe.py + portfolio_construction.py;
+# NOTE: these are the older KuCoin in-sample numbers, superseded by the OOS
+# study above):
 # 20 of 33 swept pairs clear Sharpe >= 1.1 with the production strategy, and
 # best-N analysis peaks around 7-8 equal-weight pairs (Sharpe ~2.4, worst
 # month ~-11% vs -16% on 3 pairs). Pairs chosen for narrative diversity, not
@@ -11,11 +20,17 @@
 #   L1 value:   ADA
 # Equal weight 12.5% each (weight optimization adds nothing — see FINDINGS).
 #
-# Run via the wrapper (computes the split from TOTAL_EQUITY):
-#   PORTFOLIO=8 sudo ./portfolio.sh up -d --build
-#   PORTFOLIO=8 sudo ./portfolio.sh status
-# or raw compose:
-#   docker compose -f docker-compose.bidir8.yml --env-file .env up -d --build
+# Run via the wrapper (computes the split from TOTAL_EQUITY). Use `sudo -E` so
+# the PORTFOLIO/TOTAL_EQUITY vars survive into the wrapper — WITHOUT -E, sudo
+# strips them and the wrapper silently falls back to the 5-pair at $100:
+#   PORTFOLIO=8 TOTAL_EQUITY=<total> sudo -E ./portfolio.sh up -d --build
+#   PORTFOLIO=8 sudo -E ./portfolio.sh status
+# Most robust: put PORTFOLIO=8 and TOTAL_EQUITY in .env (then plain sudo is
+# fine — the wrapper reads them from the file). REMOVE any 5-pair *_WEIGHT
+# lines from .env first: INJ_WEIGHT/ADA_WEIGHT are read by BOTH portfolios and
+# the wrapper aborts if weights don't sum to 1.0. Bring the 5-pair fully DOWN
+# first (they share the rofl-inj/rofl-ada/rofl-tgcontrol names and the INJ/ADA
+# exchange positions — never run both portfolios at once).
 
 x-bot: &bot-defaults
   build: .
@@ -35,6 +50,8 @@ x-bot: &bot-defaults
     API_PASSPHRASE: ${API_PASSPHRASE:-}
     POLL_SECONDS: ${POLL_SECONDS:-30}
     STRATEGY_PRESET: adaptive_bidir
+    COOLDOWN_BARS: ${COOLDOWN_BARS:-3}       # post-SL same-side re-entry block (bars/hours)
+    TRUST_STATE: ${TRUST_STATE:-}            # =1 overrides the STATE/SLICE preflight halt
     TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
     TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
   logging:
@@ -115,6 +132,40 @@ services:
       SYMBOL: ADA/USDT
       STARTING_EQUITY: ${ADA_EQUITY:-12.5}
     volumes: [ada8_state:/app/state, ada8_logs:/app/logs, shared_cache:/app/.cache]
+
+  # Interactive Telegram control: ONE process that long-polls getUpdates and
+  # answers Stats / Positions / Today / Health / Reconcile for the 8-pair
+  # portfolio. Reads each bot's state volume READ-ONLY and queries Bybit
+  # read-only for live equity/positions. Places no orders. Send /menu to the bot.
+  # (tg_control.py is portfolio-agnostic — it discovers whichever <bot> dirs are
+  #  mounted under /states, so the same image serves 5-pair and 8-pair.)
+  tg-control:
+    build: .
+    image: rofl-bot:latest
+    container_name: rofl-tgcontrol
+    restart: unless-stopped
+    command: ["python3", "tg_control.py"]
+    environment:
+      EXCHANGE: ${EXCHANGE:-bybit}
+      API_KEY: ${API_KEY:-}
+      API_SECRET: ${API_SECRET:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      STATES_DIR: /states
+    volumes:
+      - inj8_state:/states/inj:ro
+      - avax_state:/states/avax:ro
+      - near_state:/states/near:ro
+      - aave_state:/states/aave:ro
+      - grt_state:/states/grt:ro
+      - rune_state:/states/rune:ro
+      - doge_state:/states/doge:ro
+      - ada8_state:/states/ada:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
 volumes:
   inj8_state:

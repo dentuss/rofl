@@ -16,7 +16,8 @@ modeled. Scripts that produced each result are named.
 | Three-tier decay (−20/−35/−50%) | free on healthy pairs; LTC MDD −69%→−51% AND higher final | test_decay_funding.py, decay on LTC/BTC |
 | Multi-pair portfolio (inj_heavy) | MDD −28%→−18%, Sharpe 1.75→1.95, worst-month −16%→−7% | multipair_bidir.py |
 | scikit-learn bundled | adaptive presets actually run the regime GMM | — |
-| **Post-stop same-side re-entry cooldown** (K=3 bars; env `COOLDOWN_BARS`) | After a SL on side X, block new side-X entries for 3 bars — kills the post-stop V-bounce whipsaw. Full prod stack, 5 pairs, 3.7y: portfolio Sharpe **2.27→3.46**, worst month **−8.6%→−2.6%**, MDD −19.8%→−17.2%, beats baseline 41/44 months; OOS (held-out 40%) ΔSharpe +1.10. Placebo control confirms it is post-SL-same-side-specific. Implemented in bot.py + both backtest engines; exec-parity locked (live==backtest to the cent). | test_reentry_cooldown_prod.py, cooldown_report.py |
+| **Post-stop same-side re-entry cooldown** (K=3 bars; env `COOLDOWN_BARS`) | After a SL on side X, block new side-X entries for 3 bars — kills the post-stop V-bounce whipsaw. Full prod stack, 5 pairs, 3.7y: portfolio Sharpe **2.27→3.46**, worst month **−8.6%→−2.6%**, MDD −19.8%→−17.2%, beats baseline 41/44 months; OOS (held-out 40%) ΔSharpe +1.10. Placebo control confirms it is post-SL-same-side-specific. Implemented in bot.py + both backtest engines; exec-parity locked (live==backtest to the cent). Restart-robust since 2026-07-02 (an SL firing while the bot is down arms the cooldown from the real fill's timestamp on resume). | test_reentry_cooldown_prod.py, cooldown_report.py |
+| **SOFT5 weighting** (INJ 25 / SOL, ADA, ETH, LINK 18.75 — adopted 2026-07-02, supersedes inj_heavy) | Caps the INJ-40% single-name concentration the backtest rewards but can't risk-price. Bybit-perp (execution venue), 2.87y, K=3, honest MONTHLY Sharpe: SOFT5 3.81 vs inj_heavy 3.58 vs 8p 3.49; OOS holdout ~parity with inj_heavy (3.01 vs 3.09) — the insurance is ~free on risk-adjusted terms (costs ~9% CAGR, worst month −3.3%→−6.7%). Both 5p books beat EVERY random basket OOS; a 3-lens decision panel was unanimous for SOFT5. | portfolio_softened.py, portfolio_robustness.py |
 
 ## Rejected (tested, did not clear the bar)
 
@@ -35,6 +36,7 @@ modeled. Scripts that produced each result are named.
 | **max-Sharpe weight optimization** | in-sample optimum (2.13) didn't even beat the inj_heavy heuristic (2.16) — weight tuning has no edge | portfolio_construction.py |
 | **dynamic rebalance (trailing-3mo Sharpe)** | catastrophic performance-chasing: +4% vs +2358% static equal over 4.6y | portfolio_construction.py |
 | **Funding rate as signal** | IC ≈ 0 (mean −0.02 Spearman, funding-z vs 8–72h fwd return; weakly mean-reverting but unexploitable). "Fade extreme funding" overlay cut return ~24pp avg / −0.11 Sharpe — blocks profitable trend trades. Real Bybit/OKX funding, 5 pairs, 400d | funding_signal.py |
+| **8-pair equal-weight portfolio (go-live, 2026-07-02)** | The KuCoin in-sample edge (hourly Sharpe 3.70 vs 5p 3.37) did NOT survive the honest re-test on Bybit perp with monthly Sharpe + OOS holdout: IS 4.60 → OOS **2.70** (worst decay of any book), worst month −9.6% vs 5p −3.3%, and only 94th pct vs 500 random 8-baskets OOS (selection-driven). Both 5-pair books beat it OOS. ON HOLD — everything stays wired (compose, cooldown, tg-control) if fresh OOS evidence reverses this. | portfolio_robustness.py, portfolio_compare.py |
 
 ## Promising — UNDER VALIDATION (not adopted; do not deploy on this evidence)
 
@@ -49,12 +51,17 @@ modeled. Scripts that produced each result are named.
   RUNE/AAVE/DOGE/AVAX/GRT/NEAR all rival or beat 4 of the current 5.
 - **Diversification depth:** best-N equal-weight Sharpe peaks at N≈7 (2.44) then
   slowly dilutes; tail keeps improving with N (worst month −16%→−9%, MDD −24%→−18%).
-  Sweet spot ≈ 7-8 pre-screened pairs, equal-weight.
+  Sweet spot ≈ 7-8 pre-screened pairs, equal-weight. **SUPERSEDED 2026-07-02:** this
+  was KuCoin in-sample; the Bybit-perp OOS re-test (portfolio_robustness.py) showed
+  the 8-basket edge decaying OOS while the 5-name selection persists (97th pct vs a
+  like-for-like random-5 null). More names ≠ more robustness on the honest test.
 - **Pair performance is period-dependent** — ETH Sharpe 1.31 over 8.7y but 0.78 on
   the recent 4.6y window; FIL 1.69 full-history vs 0.74 recent. So "pick the top-N
   Sharpe" is overfitting; the robust play is a broad equal-weight basket.
-- **Weighting:** current inj_heavy is near-optimal on the 5; equal-weight gives the
-  best worst-month; leaning into recent winners (SOL/ADA) is the worst.
+- **Weighting:** inj_heavy was near-optimal on the 5 in-sample, but its tails lean on
+  the INJ-40% concentration; **production moved to SOFT5 (INJ 25 / rest 18.75) on
+  2026-07-02** — OOS parity, best monthly Sharpe, single-name risk capped. Equal-weight
+  gives the best worst-month; leaning into recent winners (SOL/ADA) is the worst.
 
 ## Meta-conclusion
 

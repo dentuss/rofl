@@ -102,6 +102,73 @@ def fetch_ohlcv(symbol: str, interval: str, days: int = 30, use_cache: bool = Tr
     return df
 
 
+_BYBIT_CLIENT = None
+
+
+def _bybit_client():
+    """One shared ccxt Bybit client so enableRateLimit throttles across ALL
+    pairs in a sweep (a per-pair client resets the limiter and trips 10006)."""
+    global _BYBIT_CLIENT
+    if _BYBIT_CLIENT is None:
+        import ccxt
+        _BYBIT_CLIENT = ccxt.bybit({"enableRateLimit": True,
+                                    "options": {"defaultType": "swap"}})
+    return _BYBIT_CLIENT
+
+
+def fetch_ohlcv_bybit(symbol: str, interval: str, days: int = 2000,
+                      use_cache: bool = True) -> pd.DataFrame:
+    """Fetch OHLCV from Bybit USDT-perp (the ACTUAL execution venue) via ccxt.
+
+    Public endpoint, no auth (read-only). `symbol` like 'INJ-USDT' maps to the
+    linear-perp ccxt symbol 'INJ/USDT:USDT'. Same return shape / index as
+    fetch_ohlcv so research scripts can swap the source. Each pair caps at its
+    Bybit perp listing date (younger than KuCoin spot for many alts — that gap is
+    itself a thing we want to measure). Cached separately (…_bybit.parquet).
+    """
+    cache_file = CACHE_DIR / f"{symbol}_{interval}_{days}d_bybit.parquet"
+    if use_cache and cache_file.exists():
+        if time.time() - cache_file.stat().st_mtime < 3600:
+            return pd.read_parquet(cache_file)
+
+    ccxt_sym = f"{symbol.replace('-', '/')}:USDT"
+    ms = INTERVAL_SEC[interval] * 1000
+    ex = _bybit_client()
+    end = ex.milliseconds()
+    since = end - days * 86400 * 1000
+    rows: list[list] = []
+    while since < end:
+        batch = None
+        for attempt in range(6):        # retry transient rate-limit (10006) w/ backoff
+            try:
+                batch = ex.fetch_ohlcv(ccxt_sym, interval, since=since, limit=1000)
+                break
+            except Exception as e:
+                if attempt == 5:
+                    raise RuntimeError(f"Bybit OHLCV failed for {ccxt_sym}: {e}")
+                time.sleep(1.5 * (attempt + 1))
+        if not batch:
+            break
+        rows.extend(batch)
+        nxt = batch[-1][0] + ms
+        if nxt <= since:          # no forward progress -> stop
+            break
+        since = nxt
+        if len(batch) < 1000:     # reached the tip
+            break
+
+    if not rows:
+        raise RuntimeError(f"No Bybit data for {ccxt_sym}")
+    df = pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close", "volume"])
+    df = df.astype({"ts": "int64", **{c: "float64" for c in ["open", "high", "low", "close", "volume"]}})
+    df = df.drop_duplicates("ts").sort_values("ts").reset_index(drop=True)
+    df["dt"] = pd.to_datetime(df["ts"], unit="ms", utc=True)
+    df = df.set_index("dt")[["open", "high", "low", "close", "volume"]]
+    if use_cache:
+        df.to_parquet(cache_file)
+    return df
+
+
 if __name__ == "__main__":
     for sym in ("BTC-USDT", "ETH-USDT", "SOL-USDT"):
         for tf in ("15m", "1h"):

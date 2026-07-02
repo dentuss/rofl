@@ -1,8 +1,12 @@
-# Multi-pair BIDIR portfolio — 5 bots in parallel, "inj_heavy" weighting.
+# Multi-pair BIDIR portfolio — 5 bots in parallel.
 #
 # Each bot runs the production preset (triple_bidir + directional regime
-# filter + F&G extreme-zone filter + equity decay) on its own pair via the
-# SYMBOL override. Capital is split INJ 40 / SOL 20 / ADA 15 / ETH 15 / LINK 10.
+# filter + F&G extreme-zone filter + equity decay + post-SL cooldown) on its
+# own pair via the SYMBOL override. The *_EQUITY defaults below encode the old
+# inj_heavy split (INJ 40 / SOL 20 / ADA 15 / ETH 15 / LINK 10); PRODUCTION
+# (2026-07-02) is the SOFT5 weighting — INJ 25 / SOL,ADA,ETH,LINK 18.75 each —
+# set via *_WEIGHT overrides in .env and computed by portfolio.sh from
+# TOTAL_EQUITY (see deploy/LIVE.md §0/§2).
 #
 # Run:
 #   docker compose -f docker-compose.bidir-portfolio.yml up -d --build
@@ -39,6 +43,8 @@ x-bot: &bot-defaults
     API_PASSPHRASE: ${API_PASSPHRASE:-}
     POLL_SECONDS: ${POLL_SECONDS:-30}
     STRATEGY_PRESET: adaptive_bidir          # symbol-agnostic bidir preset
+    COOLDOWN_BARS: ${COOLDOWN_BARS:-3}       # post-SL same-side re-entry block (bars/hours)
+    TRUST_STATE: ${TRUST_STATE:-}            # =1 overrides the STATE/SLICE preflight halt
     TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
     TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
   logging:

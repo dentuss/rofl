@@ -709,9 +709,15 @@ class Exchange:
                 continue
             if abs(qty - pos.qty) > max(pos.qty * 0.05, 1e-9):
                 continue
-            # Callers only need the real exit price; keep the return minimal so
-            # there is no unguarded parse of fields a malformed row might carry.
-            return {"exit_px": exit_px, "qty": qty}
+            # Callers need the real exit price; the fill timestamp additionally
+            # lets the resume path arm the re-entry cooldown at the correct bar.
+            # Parse the timestamp defensively — a malformed row must never crash
+            # the booking path (the reason the return is otherwise kept minimal).
+            try:
+                updated_ms = int(float(r.get("updatedTime") or 0)) or None
+            except (TypeError, ValueError):
+                updated_ms = None
+            return {"exit_px": exit_px, "qty": qty, "updated_ms": updated_ms}
         return None
 
 
@@ -941,6 +947,16 @@ class Bot:
                 if h >= p.sl:   fill, why = p.sl, "sl-external"
                 elif l <= p.tp: fill, why = p.tp, "tp-external"
                 else:           fill, why = float(last_bar["close"]), "external"
+            if why == "external":
+                # The KuCoin-fallback bar didn't confirm a touch, but a real perp
+                # SL can wick past a level the spot bar missed. Consult the real
+                # closed-PnL fill: if it landed nearer the stop than the target,
+                # treat it as a stop so the same-side cooldown still arms (matches
+                # the backtest). PnL is booked at the real fill by close_position
+                # either way, so this only affects cooldown classification.
+                real = self.ex.fetch_last_closed_fill(p, since_ms=p.open_ts * 1000)
+                if real is not None and abs(real["exit_px"] - p.sl) <= abs(real["exit_px"] - p.tp):
+                    why = "sl-external"
             self.log.warning(f"exchange position is FLAT — booking autonomous "
                              f"close at {fill:.4f} (reason={why})")
             self.close_position(fill, why, bar_ts=bar_ts)
@@ -1141,6 +1157,30 @@ class Bot:
             self.log.warning(f"notifier trade_open failed: {e}")
         self.state.save(self.cfg.state_file)
 
+    def _book_resume_autonomous_close(self, p) -> bool:
+        """On startup we found a tracked position but the exchange is flat: an
+        SL/TP fired while the bot was DOWN. Book the real close from closed-PnL
+        history and return True; return False if history is unavailable (caller
+        then clears the position without PnL).
+
+        The fill happened in the past, so we derive the cooldown's bar timestamp
+        from the fill's OWN timestamp: a stop from many bars ago yields an
+        already-expired cooldown (blocks nothing), while a stop from a fast
+        redeploy still suppresses the same-side re-entry — matching the backtest,
+        where every SL arms the cooldown regardless of process restarts.
+        """
+        real = self.ex.fetch_last_closed_fill(p, since_ms=p.open_ts * 1000)
+        if real is None:
+            return False
+        bar_sec = Exchange.TF_SECONDS.get(self.cfg.timeframe, 3600)
+        fill_ms = real.get("updated_ms")
+        close_bar_ts = (int(fill_ms) // 1000 // bar_sec * bar_sec) if fill_ms else None
+        self.log.warning(f"position in state but exchange flat — SL/TP fired while "
+                         f"down; booking real close at {real['exit_px']:.4f}"
+                         + ("" if close_bar_ts else " (no fill ts — cooldown not armed)"))
+        self.close_position(real["exit_px"], "sl-external", bar_ts=close_bar_ts)
+        return True
+
     def close_position(self, exit_px_hint: float, reason: str,
                        bar_ts: int | None = None) -> None:
         pos = self.state.position
@@ -1184,6 +1224,26 @@ class Bot:
                 else:
                     self.log.warning(f"closed-PnL unavailable ({reason}); booking "
                                      f"theoretical price {fill_px:.4f}")
+            else:
+                # Our reduce-only close FILLED. A ccxt Bybit market order carries
+                # no fill price, so fill_px fell back to the bar-close hint above;
+                # prefer the REAL fill (order 'average' if present, else closed-PnL
+                # history) so bot-initiated closes don't widen the booked-vs-real
+                # gap at $2300+/8-pair notionals. Theoretical hint stays the last
+                # resort.
+                avg = None
+                try:
+                    avg = float(order.get("average") or 0) or None
+                except (TypeError, ValueError):
+                    avg = None
+                if avg:
+                    fill_px = avg
+                else:
+                    real = self.ex.fetch_last_closed_fill(pos, since_ms=pos.open_ts * 1000)
+                    if real is not None:
+                        self.log.info(f"booking bot-initiated close at REAL fill "
+                                      f"{real['exit_px']:.4f} (hint was {fill_px:.4f})")
+                        fill_px = real["exit_px"]
         else:
             if reason == "sl":
                 fill_px = pos.sl
@@ -1203,8 +1263,10 @@ class Bot:
         # exchange's autonomous 'sl-external'), block a NEW same-side entry for
         # cooldown_bars bars. bar_ts is the just-closed bar; expiry is in calendar
         # seconds (== bar index + K on gapless 1h data, matching the backtester).
-        # Only the tick exit path passes bar_ts; the resume path leaves it None
-        # (a stop fired while down is already stale, so no live cooldown applies).
+        # Both the tick exit path and the resume path pass bar_ts (the resume
+        # path derives it from the real fill's own timestamp): a stop fired long
+        # ago yields an already-expired 'until' that blocks nothing, while a stop
+        # from a fast redeploy still suppresses the same-side re-entry.
         if (bar_ts is not None and self.cfg.cooldown_bars > 0
                 and reason.startswith("sl")):
             bar_sec = Exchange.TF_SECONDS.get(self.cfg.timeframe, 3600)
@@ -1503,13 +1565,7 @@ class Bot:
                     # closed-PnL history so the missed trade enters the books
                     # (previously dropped — a source of booked-vs-real drift). Fall
                     # back to clearing without PnL only if history is unavailable.
-                    real = self.ex.fetch_last_closed_fill(p, since_ms=p.open_ts * 1000)
-                    if real is not None:
-                        self.log.warning(f"position in state but exchange flat — SL/TP "
-                                         f"fired while down; booking real close at "
-                                         f"{real['exit_px']:.4f}")
-                        self.close_position(real["exit_px"], "sl-external")
-                    else:
+                    if not self._book_resume_autonomous_close(p):
                         self.log.warning(f"position in state but exchange is flat — "
                                          f"SL/TP fired while down; closed-PnL "
                                          f"unavailable, clearing without PnL.")
