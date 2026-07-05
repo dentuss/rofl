@@ -145,6 +145,16 @@ PRESETS = {
     # (INJ/SOL/ADA/ETH/LINK Sharpe>1.1; BTC 0.77; LTC 0.30).
     "adaptive_bidir":           ("triple_bidir", "INJ/USDT", "1h", 0.020, 5.0, False, False, True),
 
+    # 4h port of adaptive_bidir — the HONEST-REBUILD validated config
+    # (research/FINDINGS.md 2026-07-05, honest_rebuild_r2/r3 on the FIXED
+    # engine): same signal + regime + F&G + decay, 4h bars, TL_TP_MULT=6.0,
+    # COOLDOWN_BARS=0 (on the fixed engine a 1-bar cooldown is subsumed by
+    # the same-bar-re-entry fix; no K re-validated for 4h yet).
+    # SOFT5 2.88y Bybit: CAGR 15.1%, Sharpe(mo) 0.98, MDD -9.6%; passed
+    # universe (10/11), sub-window, and random-entry-null gates. Expectations
+    # are MODEST and honest — see FINDINGS before touching risk numbers.
+    "adaptive_bidir_4h":        ("triple_bidir", "INJ/USDT", "4h", 0.020, 5.0, False, False, True),
+
     # AVAX 30m — SOL's distant cousin, alternative growth pair
     # Backtest 5y: CAGR +41% / MDD -52% / monthly median +1.3%
     "avax_growth":  ("triple_long", "AVAX/USDT", "30m", 0.015, 5.0, False, False, False),
@@ -159,20 +169,20 @@ SAFER_PRESETS = {"safer_growth", "safer_high_return",
                  "safer_inj_growth", "safer_inj_high_return",
                  "adaptive_inj_growth", "adaptive_inj_high_return",
                  "adaptive_inj_bidir", "adaptive_inj_bidir_wf",
-                 "adaptive_bidir"}
+                 "adaptive_bidir", "adaptive_bidir_4h"}
 
 # Presets that use ML regime detection — block longs in BEAR.
 # Bidirectional presets ALSO block shorts in BULL (directional filter).
 ADAPTIVE_PRESETS = {"adaptive_inj_growth", "adaptive_inj_high_return",
                     "adaptive_inj_bidir", "adaptive_inj_bidir_wf",
-                    "adaptive_bidir"}
+                    "adaptive_bidir", "adaptive_bidir_4h"}
 
 # Presets that apply the F&G extreme-zone filter on top of the bidir signal:
 #   - block longs when F&G >= 80 (extreme greed)
 #   - block shorts when F&G <= 20 (extreme fear)
 # 5y backtest on INJ 1h: same return as without, MDD improved ~6pp.
 FNG_EXTREME_PRESETS = {"adaptive_inj_bidir", "adaptive_inj_bidir_wf",
-                       "adaptive_bidir"}
+                       "adaptive_bidir", "adaptive_bidir_4h"}
 
 # Presets that read dynamic (ema_fast, ema_slow, rsi_min) from params_file
 # (written by research/retune.py). Falls back to BotConfig defaults if the
