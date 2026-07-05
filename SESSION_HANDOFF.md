@@ -16,7 +16,9 @@ redeploy — see §0.5).
 
 - **Repo**: `dentuss/rofl`, work on branch `main` (squash-merge PRs only)
 - **Live setup**: 5 docker containers (`rofl-inj`, `rofl-sol`, `rofl-ada`, `rofl-eth`, `rofl-link`)
-- **Backtest expectation**: +5–7% / month median, −10–15% worst month, −18% MDD
+- ~~**Backtest expectation**: +5–7% / month median, −10–15% worst month, −18% MDD~~
+  **INVALIDATED 2026-07-05** — same-bar re-entry engine artifact; honest
+  expectation is **~0% CAGR** (see §0.4 and FINDINGS correction section)
 - **Read first**: this file → `README.md` → `deploy/LIVE.md` → `research/FINDINGS.md`
 
 The single most important thing to know: **paper-mode behavior must never
@@ -26,7 +28,36 @@ shipping anything.
 
 ---
 
-## 0.5 ⏯ CONTINUE FROM HERE — handoff @ 2026-07-02 (read this first)
+## 0.4 ⏯ CONTINUE FROM HERE — handoff @ 2026-07-05 (supersedes 0.5)
+
+> **CRITICAL FINDING — read before anything else.** While validating a
+> post-TP cooldown idea, we discovered both backtest engines allowed
+> **same-bar re-entry after an intra-bar exit**: close at TP mid-bar, then
+> open a new position at that same bar's OPEN — a fill from before the exit.
+> On SOFT5/Bybit/2.88y this artifact was 41% of all trades at a mean +1.34%
+> impossible fill advantage and produced essentially the ENTIRE backtested
+> edge: **CAGR 212% → 0.6%** with realistic fills (Sharpe(mo) 3.87 → 0.22,
+> pos months 91% → 51%). bot.py is bar-close gated — live never had this
+> edge, which is consistent with live results to date.
+>
+> **Shipped this session** (branch `fix/same-bar-reentry-artifact`):
+> - Engines fixed by default; `legacy_same_bar_reentry=True` reproduces
+>   pre-fix numbers (sanity: delta 0 vs the adopted cooldown wrapper).
+> - `cooldown_bars_tp` knob (default 0) + `with_htf_risk_bias()` — both
+>   tested; both ideas REJECTED on the honest baseline (FINDINGS).
+> - `test_exec_parity` replay now mirrors real tick() timing; documented
+>   that live `COOLDOWN_BARS=3` ≡ fixed-engine `cooldown_bars=4` (live gate
+>   compares the SIGNAL bar's ts — one bar stricter than the engine).
+> - FINDINGS/README/LIVE.md carry correction banners.
+>
+> **Open decision (user's):** bots are LIVE with ~$2,150 on a system with no
+> demonstrated edge. Options: stop the bots / cut risk / run as forward test.
+> Do NOT scale up. Any new strategy work must be validated on the FIXED
+> engine only.
+
+---
+
+## 0.5 ⏯ handoff @ 2026-07-02 (superseded by 0.4; kept for history)
 
 > **This block supersedes the 2026-06-29 block below it** (kept for history;
 > several of its "next steps" have since SHIPPED — do not redo them).

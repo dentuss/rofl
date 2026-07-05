@@ -40,6 +40,12 @@ class EnhancedBTConfig(BTConfig):
     health_lookback_bars: int = 0
     health_min_return: float = -0.15
     health_resume_return: float = -0.05
+    # ATR-multiple trailing stop (0 disables). Ratchets the stop toward price
+    # using the ENTRY bar's ATR, updated from each bar's CLOSE only after that
+    # bar's exit checks — so a tightened stop is first testable on the NEXT
+    # bar (no look-ahead; matches a live bot amending its stop at bar close).
+    # UNDER VALIDATION (research/honest_rebuild_r2.py).
+    trail_atr: float = 0.0
 
 
 def _slip(p, side, slip_bps, is_entry):
@@ -85,11 +91,12 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
     # Strategy-health gate state
     marks: list[float] = []          # equity mark history for trailing lookback
     health_paused = False
-    block_long_until = block_short_until = -1   # post-SL same-side cooldown
+    block_long_until = block_short_until = -1   # post-SL/TP same-side cooldown
 
     for i, (ts, row) in enumerate(df.iterrows()):
         o, h, l, c = row["open"], row["high"], row["low"], row["close"]
         sig_next = int(row["sig_next"])
+        exited_intrabar = False   # SL/TP/time exit this bar -> no same-bar entry
         cur_day = ts.normalize()
         if cur_day != day:
             day = cur_day
@@ -160,14 +167,23 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
                     tp=pos_tp, pnl=pnl, fees=fee, reason=reason,
                     bars_held=pos_bars,
                 ))
-                if reason == "sl" and cfg.cooldown_bars > 0:
+                cd = cfg.cooldown_bars if reason == "sl" else \
+                    cfg.cooldown_bars_tp if reason == "tp" else 0
+                if cd > 0:
                     if pos_side == 1:
-                        block_long_until = i + cfg.cooldown_bars
+                        block_long_until = i + cd
                     else:
-                        block_short_until = i + cfg.cooldown_bars
+                        block_short_until = i + cd
+                exited_intrabar = reason in ("sl", "tp", "time")
                 pos_side = 0
                 pos_qty = 0.0
                 partial_done = False
+            elif cfg.trail_atr > 0 and pos_atr > 0:
+                # still in the trade: ratchet the stop from this bar's close
+                if pos_side == 1:
+                    pos_sl = max(pos_sl, c - cfg.trail_atr * pos_atr)
+                else:
+                    pos_sl = min(pos_sl, c + cfg.trail_atr * pos_atr)
 
         # Strategy-health gate: pause new entries when trailing return is poor.
         if cfg.health_lookback_bars > 0 and len(marks) > cfg.health_lookback_bars:
@@ -183,6 +199,8 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
         #    the strategy-health gate isn't paused AND not in a post-SL cooldown
         cd_blocked = (sig_next == 1 and i < block_long_until) or \
                      (sig_next == -1 and i < block_short_until)
+        if exited_intrabar and not cfg.legacy_same_bar_reentry:
+            cd_blocked = True   # this bar's open predates the exit fill
         if (pos_side == 0 and sig_next != 0 and not day_blocked
                 and risk_scale > 0 and not health_paused and not cd_blocked):
             sl = row["sl_next"]

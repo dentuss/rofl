@@ -29,6 +29,21 @@ class BTConfig:
     # side-X entries for this many bars. 0 disables (default — preserves all
     # prior results). Validated lift (see research/FINDINGS.md "cooldown").
     cooldown_bars: int = 0
+    # Post-TP same-side re-entry cooldown, separate K. 0 disables (default —
+    # preserves all prior results). UNDER VALIDATION
+    # (research/tp_cooldown_htf_bias.py); no FINDINGS entry yet — do not
+    # enable in production on this knob alone.
+    cooldown_bars_tp: int = 0
+    # Same-bar re-entry after an intra-bar exit (SL/TP/time): the engine
+    # historically allowed closing mid-bar and then opening a NEW position at
+    # that same bar's OPEN — a fill from before the exit, chronologically
+    # impossible. No live path can do this (bot.py is bar-close gated), and on
+    # TP exits in trends it manufactures ~+1.3%/trade of phantom entry edge
+    # that dominated all absolute backtest returns (FINDINGS 2026-07-05,
+    # "same-bar re-entry artifact"). Signal-flip exits are unaffected — they
+    # fill AT the open, so a same-bar reversal is time-consistent. Default is
+    # the FIXED behavior; set True only to reproduce pre-2026-07-05 numbers.
+    legacy_same_bar_reentry: bool = False
 
 
 @dataclass
@@ -133,6 +148,7 @@ def run_backtest(price_df: pd.DataFrame, sig_df: pd.DataFrame,
     for i, (ts, row) in enumerate(df.iterrows()):
         o, h, l, c = row["open"], row["high"], row["low"], row["close"]
         sig_next = int(row["sig_next"])
+        exited_intrabar = False   # SL/TP/time exit this bar -> no same-bar entry
 
         # 1) If a position is open, check intra-bar SL/TP using THIS bar's H/L
         if pos_side != 0:
@@ -172,17 +188,22 @@ def run_backtest(price_df: pd.DataFrame, sig_df: pd.DataFrame,
                     notional=pos_notional, sl=pos_sl, tp=pos_tp,
                     pnl=pnl, fees=exit_fee, reason=reason, bars_held=pos_bars,
                 ))
-                if reason == "sl" and cfg.cooldown_bars > 0:
+                cd = cfg.cooldown_bars if reason == "sl" else \
+                    cfg.cooldown_bars_tp if reason == "tp" else 0
+                if cd > 0:
                     if pos_side == 1:
-                        block_long_until = i + cfg.cooldown_bars
+                        block_long_until = i + cd
                     else:
-                        block_short_until = i + cfg.cooldown_bars
+                        block_short_until = i + cd
+                exited_intrabar = reason in ("sl", "tp", "time")
                 pos_side = 0
                 pos_qty = 0.0
 
         # 2) If flat and we have a fresh signal at this bar's open, enter
         blocked = (sig_next == 1 and i < block_long_until) or \
                   (sig_next == -1 and i < block_short_until)
+        if exited_intrabar and not cfg.legacy_same_bar_reentry:
+            blocked = True   # this bar's open predates the exit fill
         if pos_side == 0 and sig_next != 0 and not blocked:
             sl = row["sl_next"]
             tp = row["tp_next"]
