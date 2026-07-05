@@ -43,6 +43,43 @@ def with_htf_trend_filter(df: pd.DataFrame, base_signal: pd.DataFrame,
     return out
 
 
+def with_htf_risk_bias(df: pd.DataFrame, base_signal: pd.DataFrame,
+                       htf_rule: str = "1D", ema_n: int = 50,
+                       with_mult: float = 1.0,
+                       counter_mult: float = 0.5) -> pd.DataFrame:
+    """Soft version of with_htf_trend_filter: instead of blocking entries that
+    fight the higher-timeframe trend, scale their risk through the engine's
+    `risk_mult` column (with-trend entries get `with_mult`, counter-trend get
+    `counter_mult`; counter_mult=0 degenerates to a hard block on entries).
+
+    Same shift-by-1 HTF construction as the hard filter, so only fully-closed
+    HTF bars are used (no look-ahead; the engine additionally shifts risk_mult
+    by one LTF bar together with the signal). While the HTF EMA is warming up
+    the bias is neutral (1.0). Multiplies into any pre-existing risk_mult
+    column rather than overwriting it. UNDER VALIDATION
+    (research/tp_cooldown_htf_bias.py) — not wired into the live bot.
+    """
+    out = base_signal.copy()
+    htf_unique = df["close"].resample(htf_rule).last().ffill()
+    htf_ema = htf_unique.ewm(span=ema_n, adjust=False, min_periods=ema_n).mean()
+    close_safe = htf_unique.shift(1)
+    ema_safe = htf_ema.shift(1)
+    above = (close_safe > ema_safe).reindex(df.index, method="ffill") \
+        .fillna(False).astype(bool).to_numpy()
+    known = (close_safe.notna() & ema_safe.notna()) \
+        .reindex(df.index, method="ffill").fillna(False).astype(bool).to_numpy()
+
+    sig = out["signal"].to_numpy()
+    long_m = np.where(above, with_mult, counter_mult)
+    short_m = np.where(above, counter_mult, with_mult)
+    mult = np.where(~known, 1.0,
+                    np.where(sig == 1, long_m,
+                             np.where(sig == -1, short_m, 1.0)))
+    base_mult = out["risk_mult"].to_numpy() if "risk_mult" in out.columns else 1.0
+    out["risk_mult"] = base_mult * mult
+    return out
+
+
 # --- Volatility filter -------------------------------------------------------
 def with_vol_filter(df: pd.DataFrame, base_signal: pd.DataFrame,
                     atr_n: int = 14, min_pct: float = 0.003) -> pd.DataFrame:

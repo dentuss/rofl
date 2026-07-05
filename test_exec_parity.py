@@ -94,7 +94,17 @@ def replay_live(df: pd.DataFrame, sig: pd.DataFrame, symbol: str, cooldown: int 
                 trades.append(dict(entry_bar=cur.get("entry_bar"), exit_bar=i,
                                    side=pos.side, reason=reason))
                 cur.clear()
-        # 2) enter if flat, prior-bar signal at THIS bar's open (bt convention)
+                # An SL/TP/time fill happens INSIDE (or at the close of) this
+                # bar; the real bot's earliest re-entry is the next tick, at
+                # the NEXT bar's price. Same-bar re-entry at this bar's open
+                # would be the retro-fill artifact the fixed engine also
+                # blocks (FINDINGS 2026-07-05).
+                continue
+        # 2) enter if flat, prior-bar signal at THIS bar's open (bt convention).
+        # bar_ts threading matches tick(): the real bot passes the label of the
+        # just-CLOSED signal bar (df.index[i-1]), not the fill bar — which makes
+        # the live cooldown gate one bar stricter than the engine's (see the
+        # benign-region classifier in run_case).
         if bot.state.position is None:
             s = int(sig_prev["signal"])
             if s != 0:
@@ -103,7 +113,7 @@ def replay_live(df: pd.DataFrame, sig: pd.DataFrame, symbol: str, cooldown: int 
                 bot.enter_position({"signal": s,
                                     "sl": float(sl) if pd.notna(sl) else None,
                                     "tp": float(tp) if pd.notna(tp) else None},
-                                   bar_ts=bar_ts)
+                                   bar_ts=int(df.index[i - 1].timestamp()))
                 if bot.state.position is not None:
                     cur["entry_bar"] = i
                 else:
@@ -163,15 +173,17 @@ def run_case(pair: str, days: int = 180, cooldown: int = 0) -> int:
 
     flip_bars = {t["exit_bar"] for t in bt if t["reason"] == "signal"}
     skip_set = set(skips)
-    # Bars where the backtest's post-SL cooldown blocks a same-side re-entry:
-    # [sl_exit_bar, sl_exit_bar+K). A region starting inside such a window is
-    # cooldown-driven (benign) — the live bot blocks the same window. A real
-    # off-by-one would start at sl_exit_bar+K (outside) and be flagged UNEXPECTED.
+    # Bars where a post-SL cooldown blocks a same-side re-entry. The engine
+    # blocks entry FILLS on bars [sl_exit_bar, sl_exit_bar+K); the live gate
+    # compares the SIGNAL bar's ts (one bar earlier than the fill), so it
+    # blocks fills on [sl_exit_bar+1, sl_exit_bar+K] — one bar stricter. A
+    # region starting anywhere in the union [exit, exit+K] is cooldown-driven
+    # (benign, conservative on the live side); anything else is UNEXPECTED.
     cooldown_bars = set()
     if cooldown > 0:
         for t in bt:
             if t["reason"] == "sl":
-                cooldown_bars.update(range(t["exit_bar"], t["exit_bar"] + cooldown))
+                cooldown_bars.update(range(t["exit_bar"], t["exit_bar"] + cooldown + 1))
     by_flip = by_skip = by_cooldown = unexpected = 0
     unexpected_regions = []
     for (s, e) in regions:

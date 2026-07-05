@@ -1,5 +1,12 @@
 # Going live on Bybit — step-by-step
 
+> **⚠ READ FIRST (2026-07-05):** the backtest numbers that justified going
+> live were inflated by a same-bar re-entry engine artifact. With realistic
+> fills the production SOFT5 stack measures **~0% CAGR (Sharpe(mo) 0.22,
+> MDD −20%) on 2.88y of Bybit data — no demonstrated edge**. See
+> `research/FINDINGS.md` correction section. Do not scale up on the numbers
+> below; they are kept for historical context only.
+
 This is the runbook for switching from paper to real money on a Bybit USDT
 perpetual account. Follow it in order. **Do not skip the preflight checks**
 — they're there because in paper mode every mistake is free; in live mode

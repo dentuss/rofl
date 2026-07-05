@@ -5,7 +5,49 @@ A running log of experiments so we don't re-litigate dead ends. All on
 directional regime filter + F&G extreme filter + three-tier decay, funding
 modeled. Scripts that produced each result are named.
 
+## ⚠ 2026-07-05 — CRITICAL CORRECTION: same-bar re-entry artifact
+
+**Every absolute backtest number in this file produced before 2026-07-05 is
+invalid.** Both engines allowed closing a position intra-bar (SL/TP/time
+exit) and opening a new one at that SAME bar's OPEN — a fill that
+chronologically precedes the exit. In trends, the "sell at TP, re-buy at the
+earlier, lower open" loop manufactured the edge: on SOFT5/Bybit/2.88y, 2,538
+same-bar post-TP re-entries (41% of all trades) carried a mean **+1.34%
+physically impossible fill advantage** and accounted for essentially ALL of
+the backtested return (portfolio CAGR 212% → 0.6% with the artifact removed;
+raw-ADA sanity check: final 520,105 → 43). bot.py is bar-close gated and
+cannot make these trades — **live never had this edge**.
+
+Fix (this date): both engines now block same-bar entries after SL/TP/time
+exits by default. `legacy_same_bar_reentry=True` reproduces pre-fix numbers
+(sanity: reproduces the adopted cooldown wrapper to delta 0); signal-flip
+reversals still fill at the open, which is time-consistent. Also corrected:
+`test_exec_parity`'s replay used to replicate the artifact AND thread the
+fill-bar ts into the cooldown gate, masking a real off-by-one — the live gate
+compares the SIGNAL bar's ts, so live `COOLDOWN_BARS=3` ≡ fixed-engine
+`cooldown_bars=4`.
+
+Corrected SOFT5 @ $2300, Bybit 2.88y, full production stack
+(`research/tp_cooldown_htf_bias.py`):
+
+| variant | CAGR% | Sharpe(mo) | MDD% | worst mo % | pos mo % |
+|---|---|---|---|---|---|
+| LEGACY (pre-fix illusion) | 212.4 | 3.87 | −17.4 | −6.4 | 91 |
+| FIXED_K3 (adopted config, honest) | −1.8 | −0.10 | −17.0 | −5.0 | 43 |
+| **FIXED_K4 (live-gate semantics, honest)** | **0.6** | **0.22** | **−20.3** | **−7.6** | **51** |
+
+**Conclusion: the production system has NO measurable edge once fills are
+realistic** — ~0% CAGR against a −20% max drawdown. Relative comparisons
+between pre-correction variants may retain some ordinal information (all
+shared the artifact), but nothing absolute survives, and any experiment whose
+treatment changed re-entry behavior (the SL-cooldown lift, TP chunking) is
+contaminated in magnitude too.
+
 ## Adopted (live in production)
+
+> ⚠ The performance numbers in this table predate the 2026-07-05 same-bar
+> re-entry correction and are inflated — see the correction section above.
+> The configs are as listed; the edge claims do not stand.
 
 | Change | Effect | Script |
 |---|---|---|
@@ -37,6 +79,8 @@ modeled. Scripts that produced each result are named.
 | **dynamic rebalance (trailing-3mo Sharpe)** | catastrophic performance-chasing: +4% vs +2358% static equal over 4.6y | portfolio_construction.py |
 | **Funding rate as signal** | IC ≈ 0 (mean −0.02 Spearman, funding-z vs 8–72h fwd return; weakly mean-reverting but unexploitable). "Fade extreme funding" overlay cut return ~24pp avg / −0.11 Sharpe — blocks profitable trend trades. Real Bybit/OKX funding, 5 pairs, 400d | funding_signal.py |
 | **8-pair equal-weight portfolio (go-live, 2026-07-02)** | The KuCoin in-sample edge (hourly Sharpe 3.70 vs 5p 3.37) did NOT survive the honest re-test on Bybit perp with monthly Sharpe + OOS holdout: IS 4.60 → OOS **2.70** (worst decay of any book), worst month −9.6% vs 5p −3.3%, and only 94th pct vs 500 random 8-baskets OOS (selection-driven). Both 5-pair books beat it OOS. ON HOLD — everything stays wired (compose, cooldown, tg-control) if fresh OOS evidence reverses this. | portfolio_robustness.py, portfolio_compare.py |
+| **Post-TP same-side cooldown (K_tp=2/3)** (2026-07-05, on the FIXED engine) | The live-blockable post-TP re-entries are zero-EV: gap-1 n=1756 meanR **+0.02**, gap-2 n=56 meanR −0.11; chase re-entries actually outperform pullbacks (+0.10R vs −0.06R). Blocking costs a hair (ΔSh −0.25/−0.22 vs FIXED_K4). The 2026-07-03 ADA TP→re-enter→SL round trip was variance, not a systematic leak. Engine knob `cooldown_bars_tp` stays (default 0) for future re-tests. | tp_cooldown_htf_bias.py |
+| **HTF risk-size bias** (1D/4h EMA50, counter-trend risk ×0.5/×0.75, via `with_htf_risk_bias`) | Cannot rescue a no-edge base: best cell (1D ×0.5) is ΔSh +0.02 / CAGR +0.3pp over FIXED_K4 (MDD −20.3→−15.2 is the one bright spot); OOS Sh 0.84 vs IS 0.07 is an unstable inversion = noise, and 4h is flat-negative. Re-evaluate only if a real base edge is ever established. | tp_cooldown_htf_bias.py |
 
 ## Promising — UNDER VALIDATION (not adopted; do not deploy on this evidence)
 

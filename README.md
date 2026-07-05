@@ -5,13 +5,19 @@ switches direction by detected market regime, and sizes risk down as drawdown
 deepens. Runs in **paper mode by default** — no keys, real market data — and
 goes live on Bybit (or KuCoin/OKX) with a one-line config change.
 
-> **Status:** validated on 33 pairs (20 viable) over 4.6–8.7 years of history.
-> Production (2026-07-02) is the **SOFT5 5-pair** (INJ 25 / SOL, ADA, ETH,
-> LINK 18.75) with the post-SL re-entry cooldown — on Bybit-perp data it holds
-> monthly Sharpe ~3.0 out-of-sample. The 8-pair equal-weight basket is **on
-> hold**: its older in-sample edge (Sharpe ~2.4) did not survive the OOS
-> robustness check (`research/portfolio_robustness.py`). Backtests are an
-> upper bound — paper-trade before going live.
+> **⚠ STATUS CORRECTION (2026-07-05):** a backtest-engine realism bug
+> (same-bar re-entry at the bar's open after an intra-bar TP/SL exit — a
+> chronologically impossible fill) manufactured essentially ALL of the
+> backtested edge. With realistic fills, SOFT5 on Bybit 2.88y measures
+> **~0% CAGR / Sharpe(mo) 0.22 / MDD −20%** — no demonstrated edge. Every
+> performance claim below and in the runbooks predates this correction and
+> is inflated. See `research/FINDINGS.md` (correction section) before
+> risking money. The engines are fixed by default
+> (`legacy_same_bar_reentry` reproduces old numbers).
+>
+> Prior status (pre-correction, for context): production (2026-07-02) is the
+> **SOFT5 5-pair** (INJ 25 / SOL, ADA, ETH, LINK 18.75) with the post-SL
+> re-entry cooldown; the 8-pair basket is on hold (OOS-overfit).
 
 ---
 
