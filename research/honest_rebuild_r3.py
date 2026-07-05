@@ -113,6 +113,10 @@ def null_sig(df, regs, fa, n_long, n_short, sl_mult=1.8, tp_mult=6.0):
     ATR SL/TP geometry. Destroys entry timing, preserves everything else."""
     a = regs.reindex(df.index, method="ffill").fillna("CHOP")
     above, below = fng_blocks(fa)
+    # fa spans the pre-warmup history too — align strictly to df.index or the
+    # boolean AND below silently produces union-index positions
+    above = above.reindex(df.index).fillna(False)
+    below = below.reindex(df.index).fillna(False)
     atr14 = atr_fn(df["high"], df["low"], df["close"], 14)
     ok = atr14.notna()
     allow_l = np.flatnonzero((a.isin(["BULL", "CHOP"]) & ~above & ok).to_numpy())
