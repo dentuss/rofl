@@ -46,6 +46,15 @@ class EnhancedBTConfig(BTConfig):
     # bar (no look-ahead; matches a live bot amending its stop at bar close).
     # UNDER VALIDATION (research/honest_rebuild_r2.py).
     trail_atr: float = 0.0
+    # Entry execution style. "taker": market at the bar open (fee_rate +
+    # slippage). "maker_close": post-only limit at the SIGNAL bar's close,
+    # filled only if this bar trades THROUGH the price (strict penetration —
+    # a touch may not reach a resting order), at fee_maker with no slippage;
+    # a missed fill is missed (a persisting signal simply retries next bar).
+    # Models the adverse selection honestly: maker longs fill on downticks
+    # and miss the runners. UNDER VALIDATION (research/cost_engine.py).
+    entry_style: str = "taker"
+    fee_maker: float = 0.0002      # Bybit non-VIP linear-perp maker fee
 
 
 def _slip(p, side, slip_bps, is_entry):
@@ -64,6 +73,7 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
     df["sig_next"] = df["signal"].shift(1).fillna(0).astype(int)
     df["sl_next"] = df["sl"].shift(1)
     df["tp_next"] = df["tp"].shift(1)
+    df["close_prev"] = df["close"].shift(1)   # maker_close limit price
     df["atr14"] = atr_fn(df["high"], df["low"], df["close"], 14)
     # Optional per-bar risk multiplier (e.g. for per-regime sizing).
     # If absent, treated as 1.0. Shifted by 1 (no look-ahead, matches sig).
@@ -207,14 +217,24 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
             tp = row["tp_next"]
             bar_atr = row["atr14"]
             if pd.notna(sl) and pd.notna(tp) and equity > 0 and pd.notna(bar_atr):
-                entry_fill = _slip(o, sig_next, cfg.slip_bps, True)
+                maker = cfg.entry_style == "maker_close"
+                if maker:
+                    lim = row["close_prev"]
+                    fill_ok = bool(pd.notna(lim)) and \
+                        ((l < lim) if sig_next == 1 else (h > lim))
+                    entry_fill = float(lim) if fill_ok else 1.0
+                    entry_fee_rate = cfg.fee_maker
+                else:
+                    fill_ok = True
+                    entry_fill = _slip(o, sig_next, cfg.slip_bps, True)
+                    entry_fee_rate = cfg.fee_rate
                 stop_dist = abs(entry_fill - sl) / entry_fill
                 rmult = float(row["risk_mult_next"])
-                if stop_dist > 1e-5 and rmult > 0:
+                if fill_ok and stop_dist > 1e-5 and rmult > 0:
                     risk = equity * cfg.risk_per_trade * risk_scale * rmult
                     notional = min(risk / stop_dist, equity * cfg.max_leverage)
                     qty = notional / entry_fill
-                    fee = notional * cfg.fee_rate
+                    fee = notional * entry_fee_rate
                     equity -= fee
                     pos_side = sig_next
                     pos_qty = qty
@@ -226,6 +246,43 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
                     pos_bars = 0
                     pos_notional = notional
                     partial_done = False
+                    # Entry-bar SL/TP check (taker fills at the open, so the
+                    # whole bar's range is post-entry; SL-first if both hit).
+                    # Maker fills happen mid-bar: a TP print may PREDATE the
+                    # fill, so maker entries never credit a same-bar TP; the
+                    # same-bar SL is always debited (for a maker long the
+                    # limit sits above the stop, so any path to the stop
+                    # passed through the fill first).
+                    if cfg.entry_bar_exit_check:
+                        e_sl = (l <= pos_sl) if pos_side == 1 else (h >= pos_sl)
+                        e_tp = (not maker) and \
+                            ((h >= pos_tp) if pos_side == 1 else (l <= pos_tp))
+                        if e_sl or e_tp:
+                            x_px = pos_sl if e_sl else pos_tp
+                            reason0 = "sl" if e_sl else "tp"
+                            x_fill = _slip(x_px, pos_side, cfg.slip_bps, False)
+                            gross0 = (x_fill - pos_entry) * pos_qty * pos_side
+                            fee0 = x_fill * pos_qty * cfg.fee_rate
+                            pnl0 = gross0 - fee0
+                            equity += pnl0
+                            trades.append(Trade(
+                                side=pos_side, entry_time=ts, exit_time=ts,
+                                entry_px=pos_entry, exit_px=x_fill, qty=pos_qty,
+                                notional=pos_notional, sl=pos_sl, tp=pos_tp,
+                                pnl=pnl0, fees=fee0, reason=reason0,
+                                bars_held=0))
+                            cd0 = cfg.cooldown_bars if reason0 == "sl" else \
+                                cfg.cooldown_bars_tp if reason0 == "tp" else 0
+                            if cd0 > 0:
+                                if pos_side == 1:
+                                    block_long_until = max(block_long_until,
+                                                           i + cd0)
+                                else:
+                                    block_short_until = max(block_short_until,
+                                                            i + cd0)
+                            pos_side = 0
+                            pos_qty = 0.0
+                            partial_done = False
 
         # 3) Mark equity
         if pos_side != 0:

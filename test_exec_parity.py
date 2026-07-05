@@ -117,6 +117,17 @@ def replay_live(df: pd.DataFrame, sig: pd.DataFrame, symbol: str, cooldown: int 
                                    bar_ts=int(df.index[i - 1].timestamp()))
                 if bot.state.position is not None:
                     cur["entry_bar"] = i
+                    # Exchange-attached SL/TP are live DURING the fill bar —
+                    # mirror the engine's entry-bar exit check (no grace bar).
+                    reason = bot.check_exit(bar)
+                    if reason is not None:
+                        pos = bot.state.position
+                        bot.ex.fetch_price = _const(bar["close"])
+                        bot.close_position(float(bar["close"]), reason,
+                                           bar_ts=bar_ts)
+                        trades.append(dict(entry_bar=i, exit_bar=i,
+                                           side=pos.side, reason=reason))
+                        cur.clear()
                 else:
                     skips.append(i)               # geometry / min-notional reject
     return trades, bot.state.equity, skips
