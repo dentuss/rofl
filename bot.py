@@ -216,6 +216,11 @@ class BotConfig:
     # K=3 lifts portfolio Sharpe 2.27->3.46, worst month -8.6%->-2.6%, beats the
     # no-cooldown baseline in 41/44 months. 0 disables. See research/FINDINGS.md.
     cooldown_bars: int = int(os.getenv("COOLDOWN_BARS", "3"))
+    # CHOP half-sizing (honest-era adoption 2026-07-05, baseline_promote.py):
+    # scale risk-per-trade by this factor while the detected regime is CHOP.
+    # Mirrors the backtester's risk_mult column. Default 1.0 = OFF (no
+    # behavior change until explicitly enabled via env CHOP_RISK_MULT=0.5).
+    chop_risk_mult: float = float(os.getenv("CHOP_RISK_MULT", "1.0"))
     allow_short_override: str = os.getenv("ALLOW_SHORT", "")
     state_file: str = os.getenv("STATE_FILE", "bot_state.json")
     log_file: str = os.getenv("LOG_FILE", "bot.log")
@@ -1018,6 +1023,12 @@ class Bot:
                 risk *= self.cfg.eq_risk_decay
                 self.log.info(f"equity-decay active: dd={cur_dd*100:.1f}% "
                               f"-> risk reduced to {risk*100:.2f}%")
+        # CHOP half-sizing (parity with the backtester's regime risk_mult):
+        # scale down while the current detected regime is CHOP. Off at 1.0.
+        if self.cfg.chop_risk_mult != 1.0 and self._last_regime == "CHOP":
+            risk *= self.cfg.chop_risk_mult
+            self.log.info(f"CHOP regime: risk x{self.cfg.chop_risk_mult:.2f} "
+                          f"-> {risk*100:.2f}%")
         return risk
 
     def _roll_day(self) -> None:

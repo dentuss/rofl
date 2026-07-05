@@ -104,4 +104,7 @@ Fees were 73% of gross on 1h and are still the largest cost line on 4h.
 | 2026-07-05 | 1h production (old live) | 0.6% | 0.22 | −20% | — | retired |
 | 2026-07-05 | 4h + tp6 (r3 cost model) | 15.1% | 0.98 | −9.6% | G1–G4 ✓ | superseded by ALL_IN |
 | 2026-07-05 | ALL_IN: 4h + tp6, entry-bar check, real funding, maker entries | 13.2% | 0.88 | −10.3% | G1–G4 ✓ (OOS Sh 1.14) | superseded |
-| 2026-07-05 | **EW5 / RSCD3: ALL_IN + CHOP half-size + SL cooldown K=3, equal weights** | **15.4%** | **1.11** | **−8.6%** | IS 1.07 → OOS 1.27, thirds all + | **BASELINE — all future work measured against this** |
+| 2026-07-05 | EW5 / RSCD3: ALL_IN + CHOP half-size + SL cooldown K=3, equal weights | 15.4% | 1.11 | −8.6% | IS 1.07 → OOS 1.27 | superseded |
+| 2026-07-05 | EW5 / RSCD3 + **vol targeting** | 20.6% | 1.41 | −9.6% | IS 1.37 → OOS 1.54; G4 ✓ all books | adopted layer |
+| 2026-07-05 | **MAJORS8 / RSCD3+VT** (ex-ante liquidity top-8) | 20.0% | 1.42 | −8.0% | IS 1.38 → OOS 1.41 | **trend-sleeve BASELINE** |
+| 2026-07-05 | **3-SLEEVE PORTFOLIO** (trend + TSMOM-90 + carry, inverse-vol) | vol-dial | **1.55** | mo −0.8% @ unit wts | IS 1.36 → **OOS 2.01**, thirds +1.54/+1.38/+1.82 | **PORTFOLIO TARGET — needs carry/TSMOM execution engineering + paper** |

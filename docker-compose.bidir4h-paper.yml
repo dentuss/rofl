@@ -4,9 +4,8 @@
 # honest-era baseline): triple_bidir on 4h bars + regime + F&G + decay,
 # TL_TP_MULT=6.0, COOLDOWN_BARS=2 (== engine K=3, adopted). EW5 equal weights
 # of a $2300 notional book: 460 per pair (EW5 superseded the SOFT5 weighting,
-# baseline_promote.py). NOTE: the adopted CHOP half-sizing (REGSIZE) is NOT
-# yet wired into bot.py — the paper book runs the baseline minus that layer
-# until the risk_mult live wiring ships (ROADMAP Phase 3 wiring item).
+# baseline_promote.py). CHOP half-sizing is wired (CHOP_RISK_MULT=0.5, bot.py
+# _effective_risk) — this book now runs the full promoted RSCD3 stack.
 #
 # Honest backtest expectations (2.88y Bybit, fixed engine, fees+funding):
 #   CAGR ~15%, Sharpe(mo) ~1.0, MDD ~-10%, worst month ~-6%, ~2 trades/wk/pair.
@@ -42,6 +41,8 @@ x-bot: &bot-defaults
     # Engine K=3 was adopted 2026-07-05 (baseline_promote.py); the live gate
     # compares the SIGNAL bar's ts (one bar stricter), so live 2 == engine 3.
     COOLDOWN_BARS: "2"
+    # CHOP half-sizing — the second adopted honest-era layer (RSCD3 stack)
+    CHOP_RISK_MULT: "0.5"
     TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
     TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
   logging:
