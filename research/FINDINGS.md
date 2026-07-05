@@ -61,6 +61,18 @@ contaminated in magnitude too.
 | **Post-stop same-side re-entry cooldown** (K=3 bars; env `COOLDOWN_BARS`) | After a SL on side X, block new side-X entries for 3 bars — kills the post-stop V-bounce whipsaw. Full prod stack, 5 pairs, 3.7y: portfolio Sharpe **2.27→3.46**, worst month **−8.6%→−2.6%**, MDD −19.8%→−17.2%, beats baseline 41/44 months; OOS (held-out 40%) ΔSharpe +1.10. Placebo control confirms it is post-SL-same-side-specific. Implemented in bot.py + both backtest engines; exec-parity locked (live==backtest to the cent). Restart-robust since 2026-07-02 (an SL firing while the bot is down arms the cooldown from the real fill's timestamp on resume). | test_reentry_cooldown_prod.py, cooldown_report.py |
 | **SOFT5 weighting** (INJ 25 / SOL, ADA, ETH, LINK 18.75 — adopted 2026-07-02, supersedes inj_heavy) | Caps the INJ-40% single-name concentration the backtest rewards but can't risk-price. Bybit-perp (execution venue), 2.87y, K=3, honest MONTHLY Sharpe: SOFT5 3.81 vs inj_heavy 3.58 vs 8p 3.49; OOS holdout ~parity with inj_heavy (3.01 vs 3.09) — the insurance is ~free on risk-adjusted terms (costs ~9% CAGR, worst month −3.3%→−6.7%). Both 5p books beat EVERY random basket OOS; a 3-lens decision panel was unanimous for SOFT5. | portfolio_softened.py, portfolio_robustness.py |
 
+## Adopted — HONEST-ERA research baseline (2026-07-05; paper program, NOT live)
+
+All on the FIXED engine with the full cost model (entry-bar exit check, maker
+entries at 0.02%, real per-pair funding, 2 bps slip on taker legs).
+
+| Change | Effect (SOFT5-family, Bybit 4h, 2.88y) | Script |
+|---|---|---|
+| **4h port + tp_mult 6.0** (ALL_IN cost model) | The validated core: SOFT5 13.3% CAGR / Sh(mo) 0.89 / MDD −10.3 / OOS Sh 1.16. Passed universe, sub-window, random-entry-null gates. | honest_rebuild*, cost_engine.py |
+| **CHOP half-sizing (risk ×0.5 in CHOP)** | Graveyard survivor (old "−36% return" verdict was the artifact): +0.08–0.12 Sh on every book, ~free. | graveyard_retrial.py, breadth_select.py |
+| **SL cooldown K=3 engine bars** (≡ live `COOLDOWN_BARS=2` — signal-bar gate is 1 stricter) | With half-sizing: better on EVERY metric on every book tested. | graveyard_retrial.py, baseline_promote.py |
+| **EW5 equal weighting** (supersedes SOFT5 25/18.75) | **Current baseline: CAGR 15.4%, Sh(mo) 1.11, MDD −8.6%, worst mo −4.7%, IS 1.07 → OOS 1.27, thirds +1.08/+0.52/+1.14.** Equal weight is also the least-overfit choice. (EW4-ex-INJ is better still — 19.0%/1.24 — but dropping INJ after seeing its result is performance selection; decision deferred to structural criteria + forward paper evidence.) | baseline_promote.py |
+
 ## Rejected (tested, did not clear the bar)
 
 | Idea | Why rejected | Script |
@@ -80,7 +92,12 @@ contaminated in magnitude too.
 | **Funding rate as signal** | IC ≈ 0 (mean −0.02 Spearman, funding-z vs 8–72h fwd return; weakly mean-reverting but unexploitable). "Fade extreme funding" overlay cut return ~24pp avg / −0.11 Sharpe — blocks profitable trend trades. Real Bybit/OKX funding, 5 pairs, 400d | funding_signal.py |
 | **8-pair equal-weight portfolio (go-live, 2026-07-02)** | The KuCoin in-sample edge (hourly Sharpe 3.70 vs 5p 3.37) did NOT survive the honest re-test on Bybit perp with monthly Sharpe + OOS holdout: IS 4.60 → OOS **2.70** (worst decay of any book), worst month −9.6% vs 5p −3.3%, and only 94th pct vs 500 random 8-baskets OOS (selection-driven). Both 5-pair books beat it OOS. ON HOLD — everything stays wired (compose, cooldown, tg-control) if fresh OOS evidence reverses this. | portfolio_robustness.py, portfolio_compare.py |
 | **Post-TP same-side cooldown (K_tp=2/3)** (2026-07-05, on the FIXED engine) | The live-blockable post-TP re-entries are zero-EV: gap-1 n=1756 meanR **+0.02**, gap-2 n=56 meanR −0.11; chase re-entries actually outperform pullbacks (+0.10R vs −0.06R). Blocking costs a hair (ΔSh −0.25/−0.22 vs FIXED_K4). The 2026-07-03 ADA TP→re-enter→SL round trip was variance, not a systematic leak. Engine knob `cooldown_bars_tp` stays (default 0) for future re-tests. | tp_cooldown_htf_bias.py |
-| **HTF risk-size bias** (1D/4h EMA50, counter-trend risk ×0.5/×0.75, via `with_htf_risk_bias`) | Cannot rescue a no-edge base: best cell (1D ×0.5) is ΔSh +0.02 / CAGR +0.3pp over FIXED_K4 (MDD −20.3→−15.2 is the one bright spot); OOS Sh 0.84 vs IS 0.07 is an unstable inversion = noise, and 4h is flat-negative. Re-evaluate only if a real base edge is ever established. | tp_cooldown_htf_bias.py |
+| **HTF risk-size bias** (1D/4h EMA50, counter-trend risk ×0.5/×0.75, via `with_htf_risk_bias`) | Cannot rescue a no-edge base: best cell (1D ×0.5) is ΔSh +0.02 / CAGR +0.3pp over FIXED_K4 (MDD −20.3→−15.2 is the one bright spot); OOS Sh 0.84 vs IS 0.07 is an unstable inversion = noise, and 4h is flat-negative. Re-tried on the honest 4h base (graveyard 2026-07-05): ΔSh −0.32, MDD worse — rejected again. | tp_cooldown_htf_bias.py, graveyard_retrial.py |
+| **Naive breadth (EW-23 universe)** (2026-07-05) | Indiscriminate widening DILUTES: EW-23 Sh 0.46 vs SOFT5-family ~1.0; only 12/23 names profitable. Edge is cross-sectionally heterogeneous — lives in liquid trending majors (ETH +1.11, SOL +0.90, BTC +0.77, RUNE, NEAR), bleeds in legacy alts (LTC −1.58, ETC −1.55, FIL −1.38, AAVE −1.09). | breadth_allin.py |
+| **IS-performance name selection** (2026-07-05) | The honest version of "pick winning pairs": rank on IS window only, freeze basket, judge OOS vs 300 random same-size subsets → 75th/43rd/76th pct (K=5/8/10). Trailing pair performance does NOT persist enough to select on. Universe choice must be structural (liquidity/class), never backtest ranking. | breadth_select.py |
+| **Partial TP + breakeven — re-trial** (2026-07-05) | Rejection upheld honestly: 2.0 ATR −9.6pp CAGR / −0.48 Sh; 3.0 ATR −6.0pp / −0.17. Winners must run (the old "−27% catastrophic" number was artifact-inflated but directionally right). | graveyard_retrial.py |
+| **ADX 25 entry gate — re-trial** | −0.13 Sh, −1.6pp CAGR on the honest 4h base. | graveyard_retrial.py |
+| Chop filter min_pct=0.003 — re-trial | UNINFORMATIVE on 4h (threshold tuned for 1h never fires — identical results). Needs re-parameterization for a real trial. | graveyard_retrial.py |
 
 ## Promising — UNDER VALIDATION (not adopted; do not deploy on this evidence)
 

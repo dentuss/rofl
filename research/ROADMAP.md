@@ -53,15 +53,30 @@ Fees were 73% of gross on 1h and are still the largest cost line on 4h.
 - [ ] TP-as-limit (maker on the target side) once the bot's execution layer
       is touched for maker entries
 
-## Phase 3 — Re-trial of the artifact-era graveyard (on the 4h base)
+## Phase 3 — Re-trial of the artifact-era graveyard (on the 4h base) — DONE 2026-07-05
 
-Each was "rejected" by an engine that paid a bounty per TP fired — all void:
-- [ ] Partial TP + breakeven ("catastrophic −27%" — verdict rendered by the bug)
-- [ ] Chop filter (CI/efficiency ratio), stricter ADX
-- [ ] Per-regime risk sizing ("+0.10 Sharpe, −36% return")
-- [ ] HTF risk bias (1D over 4h is a different geometry than 1D over 1h;
-      the MDD −20→−15 hint from r2 deserves its shot on the 4h base)
-- [ ] SL cooldown re-validation for 4h (currently OFF; find honest K if any)
+- [x] Partial TP: rejection upheld honestly (−6 to −10pp CAGR) — winners must run
+- [x] Chop filter: UNINFORMATIVE on 4h (1h-tuned threshold never fires);
+      re-parameterize for 4h if ever revisited
+- [x] Stricter ADX (25): rejected (−0.13 Sh)
+- [x] **Per-regime sizing: SURVIVOR — ADOPTED** (CHOP ×0.5: +0.1 Sh ~free;
+      the old "−36% return" cost was the artifact punishing reduced churn)
+- [x] HTF risk bias: rejected again on the honest 4h base (−0.32 Sh)
+- [x] **SL cooldown K=3 engine bars: ADOPTED with REGSIZE** (better on every
+      metric on every book; ≡ live COOLDOWN_BARS=2 via the signal-bar gate)
+- [ ] LIVE WIRING for CHOP half-sizing (bot.py risk_mult by regime) — needed
+      before the paper program reflects the full promoted stack
+
+## Phase 3.5 — Breadth (DONE 2026-07-05; two laws learned)
+
+- [x] Naive breadth REJECTED: EW-23 dilutes (Sh 0.46 vs ~1.0); edge lives in
+      liquid trending majors, bleeds in legacy alts (12/23 profitable)
+- [x] IS-performance name selection REJECTED: IS-ranked baskets hit only
+      75th/43rd/76th pct of random-basket nulls OOS — NEVER pick names by
+      backtest ranking; universe choice must be structural
+- [x] EW5 equal weighting ADOPTED over SOFT5 weights (least-overfit + better)
+- [ ] Structural-universe study: define liquidity/mcap criteria EX-ANTE, test
+      the resulting fixed majors basket (BTC/ETH/SOL-class) vs EW5
 
 ## Phase 4 — Signal frontier
 
@@ -88,4 +103,5 @@ Each was "rejected" by an engine that paid a bounty per TP fired — all void:
 |---|---|---|---|---|---|---|
 | 2026-07-05 | 1h production (old live) | 0.6% | 0.22 | −20% | — | retired |
 | 2026-07-05 | 4h + tp6 (r3 cost model) | 15.1% | 0.98 | −9.6% | G1–G4 ✓ | superseded by ALL_IN |
-| 2026-07-05 | **ALL_IN: 4h + tp6, entry-bar check, real funding, maker entries** | **13.2%** | **0.88** | **−10.3%** | G1–G4 ✓ (OOS Sh 1.14) | **trustworthy baseline — all future work measured against this** |
+| 2026-07-05 | ALL_IN: 4h + tp6, entry-bar check, real funding, maker entries | 13.2% | 0.88 | −10.3% | G1–G4 ✓ (OOS Sh 1.14) | superseded |
+| 2026-07-05 | **EW5 / RSCD3: ALL_IN + CHOP half-size + SL cooldown K=3, equal weights** | **15.4%** | **1.11** | **−8.6%** | IS 1.07 → OOS 1.27, thirds all + | **BASELINE — all future work measured against this** |

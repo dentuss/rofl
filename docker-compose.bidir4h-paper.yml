@@ -1,10 +1,12 @@
 # 4h PAPER portfolio — the honest-rebuild validated config, dry-run only.
 #
 # This is the forward test for the 4h port (research/FINDINGS.md 2026-07-05,
-# honest_rebuild_r2/r3): triple_bidir on 4h bars + regime + F&G + decay,
-# TL_TP_MULT=6.0, COOLDOWN_BARS=0 (a 1-bar cooldown is subsumed by the
-# same-bar-re-entry engine fix; no K re-validated on 4h). SOFT5 weights of a
-# $2300 notional book: INJ 575 / SOL,ADA,ETH,LINK 431.25.
+# honest-era baseline): triple_bidir on 4h bars + regime + F&G + decay,
+# TL_TP_MULT=6.0, COOLDOWN_BARS=2 (== engine K=3, adopted). EW5 equal weights
+# of a $2300 notional book: 460 per pair (EW5 superseded the SOFT5 weighting,
+# baseline_promote.py). NOTE: the adopted CHOP half-sizing (REGSIZE) is NOT
+# yet wired into bot.py — the paper book runs the baseline minus that layer
+# until the risk_mult live wiring ships (ROADMAP Phase 3 wiring item).
 #
 # Honest backtest expectations (2.88y Bybit, fixed engine, fees+funding):
 #   CAGR ~15%, Sharpe(mo) ~1.0, MDD ~-10%, worst month ~-6%, ~2 trades/wk/pair.
@@ -37,7 +39,9 @@ x-bot: &bot-defaults
     POLL_SECONDS: ${POLL_SECONDS:-30}
     STRATEGY_PRESET: adaptive_bidir_4h       # 4h port, symbol-agnostic
     TL_TP_MULT: "6.0"                        # validated exit (honest_rebuild_r2/r3)
-    COOLDOWN_BARS: "0"                       # not validated on 4h; engine fix covers bar-0
+    # Engine K=3 was adopted 2026-07-05 (baseline_promote.py); the live gate
+    # compares the SIGNAL bar's ts (one bar stricter), so live 2 == engine 3.
+    COOLDOWN_BARS: "2"
     TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
     TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
   logging:
@@ -53,7 +57,7 @@ services:
     environment:
       <<: *env-defaults
       SYMBOL: INJ/USDT
-      STARTING_EQUITY: ${INJ4H_EQUITY:-575}
+      STARTING_EQUITY: ${INJ4H_EQUITY:-460}
     volumes:
       - inj4h_state:/app/state
       - inj4h_logs:/app/logs
@@ -65,7 +69,7 @@ services:
     environment:
       <<: *env-defaults
       SYMBOL: SOL/USDT
-      STARTING_EQUITY: ${SOL4H_EQUITY:-431.25}
+      STARTING_EQUITY: ${SOL4H_EQUITY:-460}
     volumes:
       - sol4h_state:/app/state
       - sol4h_logs:/app/logs
@@ -77,7 +81,7 @@ services:
     environment:
       <<: *env-defaults
       SYMBOL: ADA/USDT
-      STARTING_EQUITY: ${ADA4H_EQUITY:-431.25}
+      STARTING_EQUITY: ${ADA4H_EQUITY:-460}
     volumes:
       - ada4h_state:/app/state
       - ada4h_logs:/app/logs
@@ -89,7 +93,7 @@ services:
     environment:
       <<: *env-defaults
       SYMBOL: ETH/USDT
-      STARTING_EQUITY: ${ETH4H_EQUITY:-431.25}
+      STARTING_EQUITY: ${ETH4H_EQUITY:-460}
     volumes:
       - eth4h_state:/app/state
       - eth4h_logs:/app/logs
@@ -101,7 +105,7 @@ services:
     environment:
       <<: *env-defaults
       SYMBOL: LINK/USDT
-      STARTING_EQUITY: ${LINK4H_EQUITY:-431.25}
+      STARTING_EQUITY: ${LINK4H_EQUITY:-460}
     volumes:
       - link4h_state:/app/state
       - link4h_logs:/app/logs
