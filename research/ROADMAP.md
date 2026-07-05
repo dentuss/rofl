@@ -101,11 +101,20 @@ Fees were 73% of gross on 1h and are still the largest cost line on 4h.
       understates intra-month — daily-granularity MDD study pending)
 - [ ] Order-placing executors for the sleeves (paper first, then keys):
       weekly carry rebalancer + daily TSMOM checker
-- [ ] Longer-history sleeve validation (1d data reaches 2021 for majors)
-- [ ] Weight-scheme sensitivity (inverse-vol vs equal-risk vs capped-carry —
-      the 0.76 carry weight concentrates model risk in one sleeve)
-- [ ] Daily-granularity MDD + intra-month path study of the levered combo
-- [ ] Only after the above + a real paper period: sizing-up discussion
+- [x] Longer-history sleeve validation — **FAILED**: TSMOM-90 pre-2023-08
+      Sh −0.70, carry −0.34 (both edges concentrated in 2024–2026).
+      Sleeves are demoted to "prove it forward" status; leverage on the
+      3-sleeve book is BLOCKED by our own gates.
+- [x] Weight-scheme sensitivity: IV/EQ/CAP40 within ~0.2 Sh; IV best on
+      Sharpe AND dMDD — concentration not fragile per this data
+- [x] Daily-granularity path: @25% vol dMDD −13.4% (month-end said −6.0%),
+      @50% dMDD −25.8% / worst day −20.9% / x14.4 gross — tail-risk math
+      says 50% vol is liquidation-adjacent on a fresh outlier day
+- [ ] Sleeve redesign round: diagnose the pre-2023 bleed; regime-gated
+      carry (skip when dispersion is thin), vol-filtered TSMOM
+- [ ] Only after forward paper evidence: sizing-up discussion. The
+      trend book (fully gated, Sh 1.42) is the only component currently
+      eligible for leverage talk.
 
 ## Scoreboard (fixed engine, full costs, SOFT5 unless noted)
 
