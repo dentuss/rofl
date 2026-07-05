@@ -40,6 +40,12 @@ class EnhancedBTConfig(BTConfig):
     health_lookback_bars: int = 0
     health_min_return: float = -0.15
     health_resume_return: float = -0.05
+    # ATR-multiple trailing stop (0 disables). Ratchets the stop toward price
+    # using the ENTRY bar's ATR, updated from each bar's CLOSE only after that
+    # bar's exit checks — so a tightened stop is first testable on the NEXT
+    # bar (no look-ahead; matches a live bot amending its stop at bar close).
+    # UNDER VALIDATION (research/honest_rebuild_r2.py).
+    trail_atr: float = 0.0
 
 
 def _slip(p, side, slip_bps, is_entry):
@@ -172,6 +178,12 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
                 pos_side = 0
                 pos_qty = 0.0
                 partial_done = False
+            elif cfg.trail_atr > 0 and pos_atr > 0:
+                # still in the trade: ratchet the stop from this bar's close
+                if pos_side == 1:
+                    pos_sl = max(pos_sl, c - cfg.trail_atr * pos_atr)
+                else:
+                    pos_sl = min(pos_sl, c + cfg.trail_atr * pos_atr)
 
         # Strategy-health gate: pause new entries when trailing return is poor.
         if cfg.health_lookback_bars > 0 and len(marks) > cfg.health_lookback_bars:
