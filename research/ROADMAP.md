@@ -91,11 +91,21 @@ Fees were 73% of gross on 1h and are still the largest cost line on 4h.
 
 ## Phase 5 — Capital efficiency (how real systems reach 30–70%)
 
-- [ ] Vol-targeted position sizing (risk scales to realized vol, not fixed 2%)
-- [ ] Correlation-aware weights (honest re-test; the old study was void)
-- [ ] Leverage schedule against an explicit MDD budget (e.g. target −15%:
-      with Sharpe ~1.5 base, modest leverage compounds honestly)
-- [ ] Only after G1–G5 on everything above: sizing-up discussion
+- [x] Vol-targeted position sizing — ADOPTED (G4 all books) and LIVE-WIRED
+      (`VOL_TARGET_ANN`, bot.vol_target_mult, unit-tested; paper compose 0.60)
+- [x] Sleeves prototyped + gated: TSMOM-90 (Sh 0.67, OOS 0.79) and funding
+      carry (Sh 1.18, OOS 1.51, corr to trend −0.01); paper forward-tracking
+      via sleeves_paper.py (deterministic, lagged signals, anchor-stamped)
+- [x] 3-sleeve assembly: Sh(mo) 1.55, IS 1.36 → OOS 2.01 (full_report.py:
+      @25% vol ≈ 42% CAGR, month-end MDD −6.0%; NOTE month-end MDD
+      understates intra-month — daily-granularity MDD study pending)
+- [ ] Order-placing executors for the sleeves (paper first, then keys):
+      weekly carry rebalancer + daily TSMOM checker
+- [ ] Longer-history sleeve validation (1d data reaches 2021 for majors)
+- [ ] Weight-scheme sensitivity (inverse-vol vs equal-risk vs capped-carry —
+      the 0.76 carry weight concentrates model risk in one sleeve)
+- [ ] Daily-granularity MDD + intra-month path study of the levered combo
+- [ ] Only after the above + a real paper period: sizing-up discussion
 
 ## Scoreboard (fixed engine, full costs, SOFT5 unless noted)
 

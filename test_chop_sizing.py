@@ -45,7 +45,32 @@ def test_chop_mult():
         "default 1.0 must be a no-op"
 
 
+def test_vol_target_mult():
+    import numpy as np
+    import pandas as pd
+    idx = pd.date_range("2025-01-01", periods=60 * 6, freq="4h", tz="UTC")
+    # ~constant daily vol series: alternate +2%/-2% daily moves -> ann vol ~38%
+    daily_ret = np.where(np.arange(61) % 2 == 0, 0.02, -0.02)
+    daily_px = 100 * np.cumprod(1 + daily_ret)
+    px = pd.Series(np.repeat(daily_px[:60], 6)[: len(idx)], index=idx)
+    m = botmod.vol_target_mult(px, target_ann=0.60)
+    vol = float(pd.Series(daily_px).pct_change().tail(30).std()) * (365 ** 0.5)
+    assert abs(m - min(max(0.60 / vol, 0.5), 1.5)) < 0.05, (m, vol)
+    # not enough history -> neutral
+    assert botmod.vol_target_mult(px.iloc[: 6 * 10], 0.60) == 1.0
+    # risk path: _effective_risk applies the stashed multiplier
+    b = _bot(chop_mult=1.0)
+    b.cfg.vol_target_ann = 0.60
+    b._vt_mult = 0.7
+    b._last_regime = "BULL"
+    assert abs(b._effective_risk() - b.cfg.risk_per_trade * 0.7) < 1e-12
+    b.cfg.vol_target_ann = 0.0               # off -> multiplier ignored
+    assert abs(b._effective_risk() - b.cfg.risk_per_trade) < 1e-12
+
+
 if __name__ == "__main__":
     test_chop_mult()
     print("PASS: CHOP_RISK_MULT scales risk only in CHOP; default 1.0 is a no-op")
-    print("ALL CHOP-SIZING TESTS PASSED")
+    test_vol_target_mult()
+    print("PASS: vol_target_mult parity math; VOL_TARGET_ANN gates the risk path")
+    print("ALL CHOP/VT SIZING TESTS PASSED")

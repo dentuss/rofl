@@ -184,6 +184,27 @@ ADAPTIVE_PRESETS = {"adaptive_inj_growth", "adaptive_inj_high_return",
 FNG_EXTREME_PRESETS = {"adaptive_inj_bidir", "adaptive_inj_bidir_wf",
                        "adaptive_bidir", "adaptive_bidir_4h"}
 
+
+def vol_target_mult(closes: "pd.Series", target_ann: float,
+                    clip_lo: float = 0.5, clip_hi: float = 1.5) -> float:
+    """Vol-target risk multiplier, parity with research/vol_target.vt_mult:
+    trailing 30d std of daily returns (annualized) using COMPLETE days only —
+    the in-progress day is dropped, matching the backtest's shift(1). Returns
+    1.0 when there is not enough history (min 21 complete days)."""
+    try:
+        daily = closes.resample("1D").last().dropna()
+        if len(daily) and daily.index[-1].normalize() == \
+                closes.index[-1].normalize():
+            daily = daily.iloc[:-1]          # drop the partial/current day
+        if len(daily) < 21:
+            return 1.0
+        vol = float(daily.pct_change().tail(30).std()) * (365.0 ** 0.5)
+        if not vol or vol != vol:
+            return 1.0
+        return min(max(target_ann / vol, clip_lo), clip_hi)
+    except Exception:
+        return 1.0
+
 # Presets that read dynamic (ema_fast, ema_slow, rsi_min) from params_file
 # (written by research/retune.py). Falls back to BotConfig defaults if the
 # file is missing or unreadable.
@@ -221,6 +242,12 @@ class BotConfig:
     # Mirrors the backtester's risk_mult column. Default 1.0 = OFF (no
     # behavior change until explicitly enabled via env CHOP_RISK_MULT=0.5).
     chop_risk_mult: float = float(os.getenv("CHOP_RISK_MULT", "1.0"))
+    # Vol-targeted sizing (honest-era adoption 2026-07-05, vol_target.py):
+    # scale risk by clip(target / trailing-30d-annualized-vol, 0.5, 1.5),
+    # vol from COMPLETE daily closes only (parity with the backtest's
+    # shift(1)). 0 = OFF (default — no behavior change until enabled, e.g.
+    # VOL_TARGET_ANN=0.60).
+    vol_target_ann: float = float(os.getenv("VOL_TARGET_ANN", "0"))
     allow_short_override: str = os.getenv("ALLOW_SHORT", "")
     state_file: str = os.getenv("STATE_FILE", "bot_state.json")
     log_file: str = os.getenv("LOG_FILE", "bot.log")
@@ -748,6 +775,7 @@ class Bot:
                                  symbol=cfg.symbol, logger=self.log)
         self._stop = False
         self._last_regime: str | None = None
+        self._vt_mult: float = 1.0
         self._last_daily_summary_day: int = 0
         # Set when state and the exchange irreconcilably disagree about the
         # open position (side conflict / unexpected extra size). While halted
@@ -1028,6 +1056,12 @@ class Bot:
         if self.cfg.chop_risk_mult != 1.0 and self._last_regime == "CHOP":
             risk *= self.cfg.chop_risk_mult
             self.log.info(f"CHOP regime: risk x{self.cfg.chop_risk_mult:.2f} "
+                          f"-> {risk*100:.2f}%")
+        # Vol targeting (parity with research/vol_target.vt_mult); _vt_mult is
+        # refreshed each signal cycle from complete daily closes.
+        if self.cfg.vol_target_ann > 0 and self._vt_mult != 1.0:
+            risk *= self._vt_mult
+            self.log.info(f"vol target: risk x{self._vt_mult:.2f} "
                           f"-> {risk*100:.2f}%")
         return risk
 
@@ -1426,6 +1460,8 @@ class Bot:
         # represents the open candle). We use the second-to-last row as the
         # most recent CLOSED bar.
         df = df.iloc[:-1]
+        if self.cfg.vol_target_ann > 0:
+            self._vt_mult = vol_target_mult(df["close"], self.cfg.vol_target_ann)
         last_bar = df.iloc[-1]
         bar_ts = int(df.index[-1].timestamp())
 

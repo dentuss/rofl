@@ -43,6 +43,8 @@ x-bot: &bot-defaults
     COOLDOWN_BARS: "2"
     # CHOP half-sizing — the second adopted honest-era layer (RSCD3 stack)
     CHOP_RISK_MULT: "0.5"
+    # Vol targeting — adopted 2026-07-05 (vol_target.py, G4 passed all books)
+    VOL_TARGET_ANN: "0.60"
     TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
     TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
   logging:
