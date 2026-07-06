@@ -1,17 +1,23 @@
-# 4h PAPER portfolio — the honest-rebuild validated config, dry-run only.
+# 4h PAPER portfolio — the PROMOTED BLEND50_CONF trend book, dry-run only.
 #
-# This is the forward test for the 4h port (research/FINDINGS.md 2026-07-05,
-# honest-era baseline): triple_bidir on 4h bars + regime + F&G + decay,
-# TL_TP_MULT=6.0, COOLDOWN_BARS=2 (== engine K=3, adopted). EW5 equal weights
-# of a $2300 notional book: 460 per pair (EW5 superseded the SOFT5 weighting,
-# baseline_promote.py). CHOP half-sizing is wired (CHOP_RISK_MULT=0.5, bot.py
-# _effective_risk) — this book now runs the full promoted RSCD3 stack.
+# Phase-4/5 promotion (research/FINDINGS.md 2026-07-06): MAJORS8 x two entry
+# legs at 50/50 capital —
+#   triple leg    adaptive_bidir_4h  (triple_bidir tp6)
+#   pullback leg  pullback_bidir_4h  (EMA50 side + RSI 40/60 recross, tp6)
+# both under the full adopted overlay stack: walk-forward regime mask + F&G
+# 3-day persistence + decay tiers + CHOP half-size + vol targeting + GMM
+# confidence sizing (REGIME_CONF_SIZING) + SL cooldown.
 #
-# Honest backtest expectations (2.88y Bybit, fixed engine, fees+funding):
-#   CAGR ~15%, Sharpe(mo) ~1.0, MDD ~-10%, worst month ~-6%, ~2 trades/wk/pair.
-# The paper period exists to compare LIVE fills/decisions against these
-# numbers before any real-money discussion. MODE is pinned to paper — this
-# file intentionally has no key passthrough.
+# Honest backtest expectations for the whole book (2.9y Bybit, fixed engine,
+# maker entries, TP-as-limit, real funding; daily granularity):
+#   unit weights: Sh(mo) ~1.5, dMDD ~-4.8%, worst month ~-1.7%
+#   @25% vol (x3.6): CAGR ~37%, dMDD ~-13%, worst day ~-5%
+# The pullback leg trades RARELY (~1 trade/6wk/pair, in-market 4-8%) — long
+# idle stretches on the -p services are EXPECTED, not a bug.
+# The paper period compares live fills/decisions against these numbers before
+# any real-money discussion. MODE is pinned to paper — no key passthrough.
+#
+# $2300 book / 16 services = $143 per service (equal split, 50/50 legs).
 #
 # Run:
 #   docker compose -f docker-compose.bidir4h-paper.yml up -d --build
@@ -19,8 +25,7 @@
 #   docker compose -f docker-compose.bidir4h-paper.yml down
 #
 # Do NOT run alongside a live portfolio that shares container names — these
-# use rofl4h-* names and separate volumes precisely so they can coexist with
-# nothing. Check `docker ps` anyway.
+# use rofl4h-* names and separate volumes. Check `docker ps` anyway.
 
 x-bot: &bot-defaults
   build: .
@@ -36,15 +41,13 @@ x-bot: &bot-defaults
     MODE: paper                              # pinned — no keys in this file
     EXCHANGE: ${EXCHANGE:-bybit}
     POLL_SECONDS: ${POLL_SECONDS:-30}
-    STRATEGY_PRESET: adaptive_bidir_4h       # 4h port, symbol-agnostic
     TL_TP_MULT: "6.0"                        # validated exit (honest_rebuild_r2/r3)
-    # Engine K=3 was adopted 2026-07-05 (baseline_promote.py); the live gate
-    # compares the SIGNAL bar's ts (one bar stricter), so live 2 == engine 3.
+    # Engine K=3 adopted; the live gate compares the SIGNAL bar's ts (one bar
+    # stricter), so live 2 == engine 3.
     COOLDOWN_BARS: "2"
-    # CHOP half-sizing — the second adopted honest-era layer (RSCD3 stack)
-    CHOP_RISK_MULT: "0.5"
-    # Vol targeting — adopted 2026-07-05 (vol_target.py, G4 passed all books)
-    VOL_TARGET_ANN: "0.60"
+    CHOP_RISK_MULT: "0.5"                    # RSCD3 half-sizing (adopted)
+    VOL_TARGET_ANN: "0.60"                   # vol targeting (adopted, G4)
+    REGIME_CONF_SIZING: "1"                  # GMM-confidence sizing (adopted 2026-07-06)
     TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
     TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
   logging:
@@ -53,76 +56,182 @@ x-bot: &bot-defaults
       max-size: "10m"
       max-file: "5"
 
+x-triple: &triple-env
+  <<: *env-defaults
+  STRATEGY_PRESET: adaptive_bidir_4h
+
+x-pull: &pull-env
+  <<: *env-defaults
+  STRATEGY_PRESET: pullback_bidir_4h
+
 services:
-  inj-bot:
+  btc-t:
     <<: *bot-defaults
-    container_name: rofl4h-inj
+    container_name: rofl4h-btc-t
     environment:
-      <<: *env-defaults
-      SYMBOL: INJ/USDT
-      STARTING_EQUITY: ${INJ4H_EQUITY:-460}
-    volumes:
-      - inj4h_state:/app/state
-      - inj4h_logs:/app/logs
-      - shared4h_cache:/app/.cache
+      <<: *triple-env
+      SYMBOL: BTC/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+    volumes: [btc_t_state:/app/state, btc_t_logs:/app/logs, shared4h_cache:/app/.cache]
+  btc-p:
+    <<: *bot-defaults
+    container_name: rofl4h-btc-p
+    environment:
+      <<: *pull-env
+      SYMBOL: BTC/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+    volumes: [btc_p_state:/app/state, btc_p_logs:/app/logs, shared4h_cache:/app/.cache]
 
-  sol-bot:
+  eth-t:
     <<: *bot-defaults
-    container_name: rofl4h-sol
+    container_name: rofl4h-eth-t
     environment:
-      <<: *env-defaults
-      SYMBOL: SOL/USDT
-      STARTING_EQUITY: ${SOL4H_EQUITY:-460}
-    volumes:
-      - sol4h_state:/app/state
-      - sol4h_logs:/app/logs
-      - shared4h_cache:/app/.cache
-
-  ada-bot:
-    <<: *bot-defaults
-    container_name: rofl4h-ada
-    environment:
-      <<: *env-defaults
-      SYMBOL: ADA/USDT
-      STARTING_EQUITY: ${ADA4H_EQUITY:-460}
-    volumes:
-      - ada4h_state:/app/state
-      - ada4h_logs:/app/logs
-      - shared4h_cache:/app/.cache
-
-  eth-bot:
-    <<: *bot-defaults
-    container_name: rofl4h-eth
-    environment:
-      <<: *env-defaults
+      <<: *triple-env
       SYMBOL: ETH/USDT
-      STARTING_EQUITY: ${ETH4H_EQUITY:-460}
-    volumes:
-      - eth4h_state:/app/state
-      - eth4h_logs:/app/logs
-      - shared4h_cache:/app/.cache
-
-  link-bot:
+      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+    volumes: [eth_t_state:/app/state, eth_t_logs:/app/logs, shared4h_cache:/app/.cache]
+  eth-p:
     <<: *bot-defaults
-    container_name: rofl4h-link
+    container_name: rofl4h-eth-p
     environment:
-      <<: *env-defaults
+      <<: *pull-env
+      SYMBOL: ETH/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+    volumes: [eth_p_state:/app/state, eth_p_logs:/app/logs, shared4h_cache:/app/.cache]
+
+  sol-t:
+    <<: *bot-defaults
+    container_name: rofl4h-sol-t
+    environment:
+      <<: *triple-env
+      SYMBOL: SOL/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+    volumes: [sol_t_state:/app/state, sol_t_logs:/app/logs, shared4h_cache:/app/.cache]
+  sol-p:
+    <<: *bot-defaults
+    container_name: rofl4h-sol-p
+    environment:
+      <<: *pull-env
+      SYMBOL: SOL/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+    volumes: [sol_p_state:/app/state, sol_p_logs:/app/logs, shared4h_cache:/app/.cache]
+
+  xrp-t:
+    <<: *bot-defaults
+    container_name: rofl4h-xrp-t
+    environment:
+      <<: *triple-env
+      SYMBOL: XRP/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+    volumes: [xrp_t_state:/app/state, xrp_t_logs:/app/logs, shared4h_cache:/app/.cache]
+  xrp-p:
+    <<: *bot-defaults
+    container_name: rofl4h-xrp-p
+    environment:
+      <<: *pull-env
+      SYMBOL: XRP/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+    volumes: [xrp_p_state:/app/state, xrp_p_logs:/app/logs, shared4h_cache:/app/.cache]
+
+  doge-t:
+    <<: *bot-defaults
+    container_name: rofl4h-doge-t
+    environment:
+      <<: *triple-env
+      SYMBOL: DOGE/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+    volumes: [doge_t_state:/app/state, doge_t_logs:/app/logs, shared4h_cache:/app/.cache]
+  doge-p:
+    <<: *bot-defaults
+    container_name: rofl4h-doge-p
+    environment:
+      <<: *pull-env
+      SYMBOL: DOGE/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+    volumes: [doge_p_state:/app/state, doge_p_logs:/app/logs, shared4h_cache:/app/.cache]
+
+  ada-t:
+    <<: *bot-defaults
+    container_name: rofl4h-ada-t
+    environment:
+      <<: *triple-env
+      SYMBOL: ADA/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+    volumes: [ada_t_state:/app/state, ada_t_logs:/app/logs, shared4h_cache:/app/.cache]
+  ada-p:
+    <<: *bot-defaults
+    container_name: rofl4h-ada-p
+    environment:
+      <<: *pull-env
+      SYMBOL: ADA/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+    volumes: [ada_p_state:/app/state, ada_p_logs:/app/logs, shared4h_cache:/app/.cache]
+
+  link-t:
+    <<: *bot-defaults
+    container_name: rofl4h-link-t
+    environment:
+      <<: *triple-env
       SYMBOL: LINK/USDT
-      STARTING_EQUITY: ${LINK4H_EQUITY:-460}
-    volumes:
-      - link4h_state:/app/state
-      - link4h_logs:/app/logs
-      - shared4h_cache:/app/.cache
+      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+    volumes: [link_t_state:/app/state, link_t_logs:/app/logs, shared4h_cache:/app/.cache]
+  link-p:
+    <<: *bot-defaults
+    container_name: rofl4h-link-p
+    environment:
+      <<: *pull-env
+      SYMBOL: LINK/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+    volumes: [link_p_state:/app/state, link_p_logs:/app/logs, shared4h_cache:/app/.cache]
+
+  avax-t:
+    <<: *bot-defaults
+    container_name: rofl4h-avax-t
+    environment:
+      <<: *triple-env
+      SYMBOL: AVAX/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+    volumes: [avax_t_state:/app/state, avax_t_logs:/app/logs, shared4h_cache:/app/.cache]
+  avax-p:
+    <<: *bot-defaults
+    container_name: rofl4h-avax-p
+    environment:
+      <<: *pull-env
+      SYMBOL: AVAX/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+    volumes: [avax_p_state:/app/state, avax_p_logs:/app/logs, shared4h_cache:/app/.cache]
 
 volumes:
-  inj4h_state:
-  inj4h_logs:
-  sol4h_state:
-  sol4h_logs:
-  ada4h_state:
-  ada4h_logs:
-  eth4h_state:
-  eth4h_logs:
-  link4h_state:
-  link4h_logs:
+  btc_t_state:
+  btc_t_logs:
+  btc_p_state:
+  btc_p_logs:
+  eth_t_state:
+  eth_t_logs:
+  eth_p_state:
+  eth_p_logs:
+  sol_t_state:
+  sol_t_logs:
+  sol_p_state:
+  sol_p_logs:
+  xrp_t_state:
+  xrp_t_logs:
+  xrp_p_state:
+  xrp_p_logs:
+  doge_t_state:
+  doge_t_logs:
+  doge_p_state:
+  doge_p_logs:
+  ada_t_state:
+  ada_t_logs:
+  ada_p_state:
+  ada_p_logs:
+  link_t_state:
+  link_t_logs:
+  link_p_state:
+  link_p_logs:
+  avax_t_state:
+  avax_t_logs:
+  avax_p_state:
+  avax_p_logs:
   shared4h_cache:

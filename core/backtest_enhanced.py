@@ -55,6 +55,12 @@ class EnhancedBTConfig(BTConfig):
     # and miss the runners. UNDER VALIDATION (research/cost_engine.py).
     entry_style: str = "taker"
     fee_maker: float = 0.0002      # Bybit non-VIP linear-perp maker fee
+    # TP as a resting limit order (post-only on the profit side). Fill only
+    # when the bar trades THROUGH the target (strict penetration — a touch
+    # may not reach a resting order), at fee_maker with no slippage. SL-first
+    # on a same-bar SL+TP collision is unchanged. Maker entries still never
+    # credit a same-bar TP. UNDER VALIDATION (research/tp_limit.py).
+    tp_as_limit: bool = False
 
 
 def _slip(p, side, slip_bps, is_entry):
@@ -151,7 +157,10 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
 
             # Stop / TP / time / signal-flip exit
             hit_sl = (l <= pos_sl) if pos_side == 1 else (h >= pos_sl)
-            hit_tp = (h >= pos_tp) if pos_side == 1 else (l <= pos_tp)
+            if cfg.tp_as_limit:
+                hit_tp = (h > pos_tp) if pos_side == 1 else (l < pos_tp)
+            else:
+                hit_tp = (h >= pos_tp) if pos_side == 1 else (l <= pos_tp)
             exit_px = None
             reason = ""
             if hit_sl and hit_tp:
@@ -165,9 +174,13 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
             elif sig_next != 0 and sig_next != pos_side:
                 exit_px = o; reason = "signal"
             if exit_px is not None:
-                fill = _slip(exit_px, pos_side, cfg.slip_bps, False)
+                if reason == "tp" and cfg.tp_as_limit:
+                    fill = exit_px                      # limit fill, no slip
+                    fee = fill * pos_qty * cfg.fee_maker
+                else:
+                    fill = _slip(exit_px, pos_side, cfg.slip_bps, False)
+                    fee = fill * pos_qty * cfg.fee_rate
                 gross = (fill - pos_entry) * pos_qty * pos_side
-                fee = fill * pos_qty * cfg.fee_rate
                 pnl = gross - fee
                 equity += pnl
                 trades.append(Trade(
@@ -255,14 +268,23 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
                     # passed through the fill first).
                     if cfg.entry_bar_exit_check:
                         e_sl = (l <= pos_sl) if pos_side == 1 else (h >= pos_sl)
-                        e_tp = (not maker) and \
-                            ((h >= pos_tp) if pos_side == 1 else (l <= pos_tp))
+                        if cfg.tp_as_limit:
+                            e_tp = (not maker) and \
+                                ((h > pos_tp) if pos_side == 1 else (l < pos_tp))
+                        else:
+                            e_tp = (not maker) and \
+                                ((h >= pos_tp) if pos_side == 1 else (l <= pos_tp))
                         if e_sl or e_tp:
                             x_px = pos_sl if e_sl else pos_tp
                             reason0 = "sl" if e_sl else "tp"
-                            x_fill = _slip(x_px, pos_side, cfg.slip_bps, False)
+                            if reason0 == "tp" and cfg.tp_as_limit:
+                                x_fill = x_px
+                                fee0 = x_fill * pos_qty * cfg.fee_maker
+                            else:
+                                x_fill = _slip(x_px, pos_side, cfg.slip_bps,
+                                               False)
+                                fee0 = x_fill * pos_qty * cfg.fee_rate
                             gross0 = (x_fill - pos_entry) * pos_qty * pos_side
-                            fee0 = x_fill * pos_qty * cfg.fee_rate
                             pnl0 = gross0 - fee0
                             equity += pnl0
                             trades.append(Trade(

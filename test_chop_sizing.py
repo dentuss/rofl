@@ -68,9 +68,34 @@ def test_vol_target_mult():
     assert abs(b._effective_risk() - b.cfg.risk_per_trade) < 1e-12
 
 
+def test_regime_conf_sizing():
+    b = _bot(chop_mult=1.0)
+    base = b.cfg.risk_per_trade
+    b._last_regime = "BULL"
+    b.cfg.regime_conf_sizing = True
+    b._regime_conf = 0.5
+    assert abs(b._effective_risk() - base * (0.5 + 0.5 * 0.5)) < 1e-12, \
+        "conf 0.5 must scale risk x0.75"
+    b._regime_conf = 1.0                      # full conviction = no scaling
+    assert abs(b._effective_risk() - base) < 1e-12
+    b.cfg.regime_conf_sizing = False          # default off -> ignored
+    b._regime_conf = 0.4
+    assert abs(b._effective_risk() - base) < 1e-12, "off must be a no-op"
+    # composes multiplicatively with CHOP half-sizing (research parity:
+    # chop_mult * (0.5 + 0.5*conf))
+    b2 = _bot(chop_mult=0.5)
+    b2.cfg.regime_conf_sizing = True
+    b2._last_regime = "CHOP"
+    b2._regime_conf = 0.5
+    assert abs(b2._effective_risk()
+               - b2.cfg.risk_per_trade * 0.5 * 0.75) < 1e-12
+
+
 if __name__ == "__main__":
     test_chop_mult()
     print("PASS: CHOP_RISK_MULT scales risk only in CHOP; default 1.0 is a no-op")
     test_vol_target_mult()
     print("PASS: vol_target_mult parity math; VOL_TARGET_ANN gates the risk path")
+    test_regime_conf_sizing()
+    print("PASS: REGIME_CONF_SIZING scales risk x(0.5+0.5*conf); off is a no-op")
     print("ALL CHOP/VT SIZING TESTS PASSED")

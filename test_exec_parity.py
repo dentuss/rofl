@@ -36,7 +36,7 @@ os.environ.setdefault("MODE", "paper")  # BotConfig reads env at import
 import bot as botmod  # noqa: E402
 from core.backtest import BTConfig, run_backtest  # noqa: E402
 from core.data import fetch_ohlcv  # noqa: E402
-from core.strategies import triple_confirm_bidir  # noqa: E402
+from core.strategies import pullback_in_trend, triple_confirm_bidir  # noqa: E402
 
 BASE = dict(ema_fast=9, ema_slow=26, ema_trend=50, rsi_min=55.0, adx_min=22.0,
             atr_n=14, sl_mult=1.8, tp_mult=3.0)
@@ -175,12 +175,18 @@ def _diff_regions(a, b):
 
 
 def run_case(pair: str, days: int = 180, cooldown: int = 0,
-             tf: str = "1h", tp_mult: float | None = None) -> int:
+             tf: str = "1h", tp_mult: float | None = None,
+             strategy: str = "triple") -> int:
     df = fetch_ohlcv(pair, tf, days=days)
-    params = dict(BASE) if tp_mult is None else {**BASE, "tp_mult": tp_mult}
-    sig = triple_confirm_bidir(df, **params)
+    if strategy == "pullback":
+        sig = pullback_in_trend(
+            df, tp_mult=6.0 if tp_mult is None else tp_mult)
+        preset = "pullback_bidir_4h"
+    else:
+        params = dict(BASE) if tp_mult is None else {**BASE, "tp_mult": tp_mult}
+        sig = triple_confirm_bidir(df, **params)
+        preset = "adaptive_bidir_4h" if tf == "4h" else "adaptive_bidir"
     bt, bt_eq = backtest_run(df, sig, cooldown=cooldown)
-    preset = "adaptive_bidir_4h" if tf == "4h" else "adaptive_bidir"
     live, live_eq, skips = replay_live(df, sig, pair.replace("-", "/"),
                                        cooldown=cooldown, preset=preset)
     n = len(df)
@@ -234,6 +240,10 @@ def main():
     print("\n--- 4h parity (K=0, tp_mult=6.0): the honest-rebuild paper config ---")
     h4_unexpected = sum(run_case(p, 540, cooldown=0, tf="4h", tp_mult=6.0)
                         for p, _ in pairs)
+    print("\n--- pullback parity (4h, K=3): the BLEND50_CONF second leg ---")
+    pb_unexpected = sum(run_case(p, 540, cooldown=3, tf="4h",
+                                 strategy="pullback")
+                        for p in ("BTC-USDT", "ETH-USDT", "SOL-USDT"))
     print("=" * 64)
     assert base_unexpected == 0, (
         f"{base_unexpected} UNEXPECTED exec-divergence region(s) at K=0: the live "
@@ -245,8 +255,13 @@ def main():
     assert h4_unexpected == 0, (
         f"{h4_unexpected} UNEXPECTED divergence region(s) on the 4h/tp6 config: the "
         f"live executor diverges from the fixed engine on the paper-program setup.")
-    print("EXEC PARITY OK - K=0 exec matches, the K=3 cooldown gate matches, and "
-          "the 4h/tp6 paper config matches the fixed engine; no unexpected drift.")
+    assert pb_unexpected == 0, (
+        f"{pb_unexpected} UNEXPECTED divergence region(s) on the pullback 4h config: "
+        f"the live executor diverges from the fixed engine on the promoted "
+        f"BLEND50_CONF second leg. Investigate before papering.")
+    print("EXEC PARITY OK - K=0 exec matches, the K=3 cooldown gate matches, the "
+          "4h/tp6 paper config matches, and the pullback 4h leg matches the fixed "
+          "engine; no unexpected drift.")
 
 
 if __name__ == "__main__":

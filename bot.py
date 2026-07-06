@@ -65,7 +65,8 @@ from core.event_log import EventLog
 from core.notifier import Notifier
 from core.risk import DEFAULT_DECAY_TIERS, decay_risk_scale, parse_tiers
 from core.sentiment import fetch_fear_greed
-from core.strategies import donchian_breakout, triple_confirm_bidir, triple_confirm_long
+from core.strategies import (donchian_breakout, pullback_in_trend,
+                             triple_confirm_bidir, triple_confirm_long)
 from core.strategies_enhanced import with_htf_trend_filter
 from core.strategies_sentiment import donchian_skip_fear
 
@@ -155,6 +156,15 @@ PRESETS = {
     # are MODEST and honest — see FINDINGS before touching risk numbers.
     "adaptive_bidir_4h":        ("triple_bidir", "INJ/USDT", "4h", 0.020, 5.0, False, False, True),
 
+    # Pullback-in-trend 4h — the SECOND leg of the promoted BLEND50_CONF
+    # trend book (research/FINDINGS.md 2026-07-06): EMA50 side + RSI recross
+    # of 40/60, sl 1.8 / tp 6.0 ATR (set TL_TP_MULT=6.0). Same overlay stack
+    # as adaptive_bidir_4h (regime + F&G persistence + decay + CHOP half-size
+    # + VT + cooldown). Runs at HALF the book's capital next to a triple
+    # service on the same symbol. Standalone: Sh(mo) ~1.35, MDD -2.1%, G3
+    # 98th pct; blend with triple: Sh 1.47-1.52. Symbol-agnostic via SYMBOL=.
+    "pullback_bidir_4h":        ("pullback_trend", "BTC/USDT", "4h", 0.020, 5.0, False, False, True),
+
     # AVAX 30m — SOL's distant cousin, alternative growth pair
     # Backtest 5y: CAGR +41% / MDD -52% / monthly median +1.3%
     "avax_growth":  ("triple_long", "AVAX/USDT", "30m", 0.015, 5.0, False, False, False),
@@ -169,20 +179,22 @@ SAFER_PRESETS = {"safer_growth", "safer_high_return",
                  "safer_inj_growth", "safer_inj_high_return",
                  "adaptive_inj_growth", "adaptive_inj_high_return",
                  "adaptive_inj_bidir", "adaptive_inj_bidir_wf",
-                 "adaptive_bidir", "adaptive_bidir_4h"}
+                 "adaptive_bidir", "adaptive_bidir_4h", "pullback_bidir_4h"}
 
 # Presets that use ML regime detection — block longs in BEAR.
 # Bidirectional presets ALSO block shorts in BULL (directional filter).
 ADAPTIVE_PRESETS = {"adaptive_inj_growth", "adaptive_inj_high_return",
                     "adaptive_inj_bidir", "adaptive_inj_bidir_wf",
-                    "adaptive_bidir", "adaptive_bidir_4h"}
+                    "adaptive_bidir", "adaptive_bidir_4h",
+                    "pullback_bidir_4h"}
 
 # Presets that apply the F&G extreme-zone filter on top of the bidir signal:
 #   - block longs when F&G >= 80 (extreme greed)
 #   - block shorts when F&G <= 20 (extreme fear)
 # 5y backtest on INJ 1h: same return as without, MDD improved ~6pp.
 FNG_EXTREME_PRESETS = {"adaptive_inj_bidir", "adaptive_inj_bidir_wf",
-                       "adaptive_bidir", "adaptive_bidir_4h"}
+                       "adaptive_bidir", "adaptive_bidir_4h",
+                       "pullback_bidir_4h"}
 
 
 def vol_target_mult(closes: "pd.Series", target_ann: float,
@@ -242,6 +254,12 @@ class BotConfig:
     # Mirrors the backtester's risk_mult column. Default 1.0 = OFF (no
     # behavior change until explicitly enabled via env CHOP_RISK_MULT=0.5).
     chop_risk_mult: float = float(os.getenv("CHOP_RISK_MULT", "1.0"))
+    # GMM-confidence sizing (adopted 2026-07-06, research/regime_upgrades.py):
+    # risk x (0.5 + 0.5 * posterior of the detected regime). Off by default;
+    # the paper compose enables it. Uses the same full-history fit as the
+    # live regime label (the research validation used walk-forward fits —
+    # same acknowledged approximation as the label itself).
+    regime_conf_sizing: bool = os.getenv("REGIME_CONF_SIZING", "0") == "1"
     # Vol-targeted sizing (honest-era adoption 2026-07-05, vol_target.py):
     # scale risk by clip(target / trailing-30d-annualized-vol, 0.5, 1.5),
     # vol from COMPLETE daily closes only (parity with the backtest's
@@ -776,6 +794,7 @@ class Bot:
         self._stop = False
         self._last_regime: str | None = None
         self._vt_mult: float = 1.0
+        self._regime_conf: float = 1.0   # posterior of the detected regime
         self._last_daily_summary_day: int = 0
         # Set when state and the exchange irreconcilably disagree about the
         # open position (side conflict / unexpected extra size). While halted
@@ -834,6 +853,16 @@ class Bot:
                 ema_trend=self.cfg.ema_trend,
                 rsi_min=rm,
                 adx_min=self.cfg.tl_adx_min,
+                atr_n=self.cfg.atr_n,
+                sl_mult=self.cfg.tl_sl_mult,
+                tp_mult=self.cfg.tl_tp_mult,
+            )
+        elif self.cfg.strategy == "pullback_trend":
+            # Promoted 2026-07-06 (BLEND50_CONF second leg). band=40 is the
+            # pre-registered constant; sl/tp share the TL_* envs (1.8 / 6.0).
+            sig = pullback_in_trend(
+                df,
+                ema_n=self.cfg.ema_trend,
                 atr_n=self.cfg.atr_n,
                 sl_mult=self.cfg.tl_sl_mult,
                 tp_mult=self.cfg.tl_tp_mult,
@@ -899,8 +928,23 @@ class Bot:
             try:
                 bpd = {"15m": 96, "30m": 48, "1h": 24, "4h": 6, "1d": 1}.get(
                     self.cfg.timeframe, 24)
-                _, _, regime_series = _regime_fit_predict(df, bars_per_day=bpd)
+                gmm, _mapping, regime_series = _regime_fit_predict(
+                    df, bars_per_day=bpd)
                 regime_label = regime_series.iloc[-1]
+                if self.cfg.regime_conf_sizing:
+                    try:
+                        from core.regime import build_features, feature_matrix
+                        fm = feature_matrix(build_features(df,
+                                                           bars_per_day=bpd))
+                        import numpy as _np
+                        valid = fm.iloc[[-1]].replace(
+                            [_np.inf, -_np.inf], _np.nan).dropna()
+                        self._regime_conf = float(
+                            gmm.predict_proba(valid.values).max()) \
+                            if len(valid) else 1.0
+                    except Exception as e:
+                        self.log.warning(f"regime conf failed, neutral 1.0: {e}")
+                        self._regime_conf = 1.0
                 last_sig = int(sig.iloc[-1]["signal"])
                 block = (last_sig ==  1 and regime_label == "BEAR") \
                      or (last_sig == -1 and regime_label == "BULL")
@@ -1062,6 +1106,13 @@ class Bot:
         if self.cfg.vol_target_ann > 0 and self._vt_mult != 1.0:
             risk *= self._vt_mult
             self.log.info(f"vol target: risk x{self._vt_mult:.2f} "
+                          f"-> {risk*100:.2f}%")
+        # GMM-confidence sizing (parity with research risk_mult x
+        # (0.5 + 0.5 * p_label)); _regime_conf refreshed each signal cycle.
+        if self.cfg.regime_conf_sizing and self._regime_conf < 1.0:
+            m = 0.5 + 0.5 * self._regime_conf
+            risk *= m
+            self.log.info(f"regime conf {self._regime_conf:.2f}: risk x{m:.2f} "
                           f"-> {risk*100:.2f}%")
         return risk
 

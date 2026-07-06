@@ -48,11 +48,11 @@ import core.regime as _regime
 from core.backtest_enhanced import EnhancedBTConfig, run_backtest_enhanced
 from core.data import fetch_ohlcv_bybit
 from core.funding import fetch_funding
-from core.indicators import atr, ema, rsi
 from core.risk import DEFAULT_DECAY_TIERS
 from core.sentiment import align_to_bars, fetch_fear_greed
 from core.strategies import (bb_meanrev, donchian_breakout, ema_trend,
-                             macd_trend, supertrend_rsi, triple_confirm_bidir)
+                             macd_trend, pullback_in_trend, supertrend_rsi,
+                             triple_confirm_bidir)
 from research.cost_engine import (apply_funding_real, regime_mask, fng_persist,
                                   sharpe_m, stats, build, FEE_TAKER, FEE_MAKER)
 from research.regime_cache import wf_regimes_cached
@@ -67,26 +67,8 @@ WARMUP_D = 365
 BPD = 6
 
 
-def pullback_in_trend(df: pd.DataFrame, ema_n: int = 50, rsi_n: int = 14,
-                      band: float = 40.0, atr_n: int = 14,
-                      sl_mult: float = 1.8, tp_mult: float = 6.0) -> pd.DataFrame:
-    """Long when close > EMA50 and RSI crosses back UP through `band` (dip
-    resolved); short mirror at 100-band. Event-style entries."""
-    out = pd.DataFrame(index=df.index)
-    e = ema(df["close"], ema_n)
-    r = rsi(df["close"], rsi_n)
-    a = atr(df["high"], df["low"], df["close"], atr_n)
-    hi = 100.0 - band
-    long_cond = (df["close"] > e) & (r.shift(1) < band) & (r >= band)
-    short_cond = (df["close"] < e) & (r.shift(1) > hi) & (r <= hi)
-    sig = np.where(long_cond, 1, np.where(short_cond, -1, 0))
-    out["signal"] = sig
-    out["sl"] = np.where(sig == 1, df["close"] - sl_mult * a,
-                np.where(sig == -1, df["close"] + sl_mult * a, np.nan))
-    out["tp"] = np.where(sig == 1, df["close"] + tp_mult * a,
-                np.where(sig == -1, df["close"] - tp_mult * a, np.nan))
-    return out
-
+# pullback_in_trend was promoted 2026-07-06 and moved to core.strategies
+# (imported above; re-exported here for pullback_validation.py and friends).
 
 FAMS = {
     "TRIPLE_T6":  lambda df: triple_confirm_bidir(df, tp_mult=6.0),

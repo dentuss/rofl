@@ -211,6 +211,36 @@ def triple_confirm_bidir(df: pd.DataFrame,
     return out
 
 
+def pullback_in_trend(df: pd.DataFrame,
+                      ema_n: int = 50, rsi_n: int = 14, band: float = 40.0,
+                      atr_n: int = 14, sl_mult: float = 1.8,
+                      tp_mult: float = 6.0) -> pd.DataFrame:
+    """Buy the dip inside the trend: long when close > EMA(ema_n) and RSI
+    crosses back UP through `band` (dip resolved); short mirror at 100-band.
+    Event-style entries (fires only on the recross bar), ATR stops.
+
+    Promoted 2026-07-06 (research/entry_families.py + pullback_validation.py):
+    on MAJORS8 4h through the full adopted stack — Sh(mo) ~1.35 standalone,
+    MDD -2.1%, worst month -0.6%, monthly corr to triple_bidir 0.17, G3
+    random-entry null 98th pct. Runs as the second leg of the BLEND50_CONF
+    trend book (50/50 with triple_bidir tp6).
+    """
+    out = pd.DataFrame(index=df.index)
+    e = ema(df["close"], ema_n)
+    r = rsi(df["close"], rsi_n)
+    a = atr(df["high"], df["low"], df["close"], atr_n)
+    hi = 100.0 - band
+    long_cond = (df["close"] > e) & (r.shift(1) < band) & (r >= band)
+    short_cond = (df["close"] < e) & (r.shift(1) > hi) & (r <= hi)
+    sig = np.where(long_cond, 1, np.where(short_cond, -1, 0))
+    out["signal"] = sig
+    out["sl"] = np.where(sig == 1, df["close"] - sl_mult * a,
+                np.where(sig == -1, df["close"] + sl_mult * a, np.nan))
+    out["tp"] = np.where(sig == 1, df["close"] + tp_mult * a,
+                np.where(sig == -1, df["close"] - tp_mult * a, np.nan))
+    return out
+
+
 REGISTRY: dict[str, StrategyConfig] = {
     "ema_trend":         StrategyConfig("ema_trend",         ema_trend),
     "supertrend_rsi":    StrategyConfig("supertrend_rsi",    supertrend_rsi),
@@ -219,4 +249,5 @@ REGISTRY: dict[str, StrategyConfig] = {
     "macd_trend":        StrategyConfig("macd_trend",        macd_trend),
     "triple_long":       StrategyConfig("triple_long",       triple_confirm_long, long_only=True),
     "triple_bidir":      StrategyConfig("triple_bidir",      triple_confirm_bidir),
+    "pullback_trend":    StrategyConfig("pullback_trend",    pullback_in_trend),
 }

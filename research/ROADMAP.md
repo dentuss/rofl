@@ -50,8 +50,11 @@ Fees were 73% of gross on 1h and are still the largest cost line on 4h.
       one-bar grace period was worth 1.2pp CAGR / 0.07 Sh — removed
 - [ ] Slippage/spread measurement from paper+live fill logs → replace the
       flat 2 bps assumption with measured per-pair values
-- [ ] TP-as-limit (maker on the target side) once the bot's execution layer
-      is touched for maker entries
+- [x] TP-as-limit — **ADOPTED 2026-07-06** (engine `tp_as_limit`, strict
+      penetration, maker fee): ZERO TP fills lost on the promoted books,
+      fees −18% on the triple leg, blend Sh 1.50→1.52. Live execution
+      still needs the reduce-only-limit order type in bot.py (currently
+      exchange-side conditional = taker) — pending execution work
 
 ## Phase 3 — Re-trial of the artifact-era graveyard (on the 4h base) — DONE 2026-07-05
 
@@ -99,9 +102,11 @@ Fees were 73% of gross on 1h and are still the largest cost line on 4h.
 - [x] Regime layer upgrades — **CONF sizing ADOPTED** (posterior-confidence
       risk mult, better on every metric in two runs); BTC-pooled clock
       REJECTED (1.06); finer features deferred (regime_upgrades.py)
-- [ ] LIVE WIRING for the promoted stack: pullback preset in bot.py, CONF
-      sizing (needs walk-forward proba in the live regime path), two-book
-      blend allocation — paper program should reflect BLEND50_CONF
+- [x] LIVE WIRING for the promoted stack (2026-07-06): `pullback_bidir_4h`
+      preset (pullback_in_trend now in core.strategies), REGIME_CONF_SIZING
+      (posterior of the full-history fit — same approximation as the live
+      label), paper compose = 8 names x 2 legs @ 50/50 + CONF; exec parity
+      green on the pullback leg (0 unexpected regions, ETH/SOL to the cent)
 
 ## Phase 5 — Capital efficiency (how real systems reach 30–70%)
 
@@ -133,9 +138,16 @@ Fees were 73% of gross on 1h and are still the largest cost line on 4h.
       trims the wrong months; 2021 universe was half-thin (13/23 names).
       No exploitable structure in the bleed → sleeves stay prove-it-forward,
       leverage stays blocked (sleeve_diagnosis.py)
+- [x] Assembly v2 with the promoted trend book (2026-07-06): the deployable
+      BLEND50_CONF book runs at 7% ann vol unweighted → @25% vol is only
+      x3.6 gross: 37.4% CAGR / Sh 1.49 / dMDD −13.4% / worst day −5.1% /
+      OOS 1.52. @50% = x7.2 gross, 77.5% CAGR, dMDD −26% (vs the old
+      sleeve-combo needing x14.4 for similar CAGR). 3-sleeve v2 info-only:
+      @25% 42.5% CAGR / Sh 1.50 / OOS 1.91 (assemble_v2.py)
 - [ ] Only after forward paper evidence: sizing-up discussion. The
-      trend book (fully gated, Sh 1.42) is the only component currently
-      eligible for leverage talk.
+      trend book (fully gated, now BLEND50_CONF Sh ~1.5) is the only
+      component currently eligible for leverage talk; the vol dial (x2-x4)
+      is where the 20-40% CAGR lives once the paper record confirms.
 
 ## Scoreboard (fixed engine, full costs, SOFT5 unless noted)
 
@@ -148,4 +160,5 @@ Fees were 73% of gross on 1h and are still the largest cost line on 4h.
 | 2026-07-05 | EW5 / RSCD3 + **vol targeting** | 20.6% | 1.41 | −9.6% | IS 1.37 → OOS 1.54; G4 ✓ all books | adopted layer |
 | 2026-07-05 | **MAJORS8 / RSCD3+VT** (ex-ante liquidity top-8) | 20.0% | 1.42 | −8.0% | IS 1.38 → OOS 1.41 | **trend-sleeve BASELINE** |
 | 2026-07-05 | **3-SLEEVE PORTFOLIO** (trend + TSMOM-90 + carry, inverse-vol) | vol-dial | **1.55** | mo −0.8% @ unit wts | IS 1.36 → **OOS 2.01**, thirds +1.54/+1.38/+1.82 | **PORTFOLIO TARGET — needs carry/TSMOM execution engineering + paper** |
-| 2026-07-06 | **TRIPLE+PULL BLEND50 + CONF sizing** (Phase-4 promotion) | 10.5% @ unit wts (vol-dial) | **1.47** | −4.8% | PULL G3 98th pct; IS 1.53 → OOS 1.43; thirds +2.40/+0.79/+1.46 | **new trend-book BASELINE — needs PULL preset + CONF + blend live wiring** |
+| 2026-07-06 | **TRIPLE+PULL BLEND50 + CONF sizing** (Phase-4 promotion) | 10.5% @ unit wts (vol-dial) | **1.47** | −4.8% | PULL G3 98th pct; IS 1.53 → OOS 1.43; thirds +2.40/+0.79/+1.46 | superseded by +TP-limit below |
+| 2026-07-06 | **BLEND50_CONF + TP-as-limit @ 25% vol (x3.6)** — assembly v2, daily granularity | **37.4%** | **1.49** | dMDD **−13.4%**, worst day −5.1% | IS 1.43 → OOS 1.52 | **DEPLOYED-TO-PAPER CONFIG** (compose = 8 names × 2 legs + CONF; note paper runs UNlevered unit weights — the dial is a sizing decision, not bot logic) |
