@@ -1,22 +1,21 @@
 # 4h LIVE portfolio — the promoted BLEND50_CONF trend book, REAL MONEY.
 #
-# ============================ DO NOT START YET ============================
-# This file exists so the go-live path is reviewed and versioned BEFORE the
-# green light — not improvised on deploy day. Start it ONLY when every
-# criterion in research/ROADMAP.md "Phase 6 — Go-live program" is met:
-#   1. >= 4 weeks green paper record on docker-compose.bidir4h-paper.yml
-#      (weekly reconcile vs fixed-engine expectations, no unexplained drift)
-#   2. Stage A first: MIN_NOTIONAL smoke run (LEG4H_EQUITY tiny) for ~2 weeks
-#      to prove real order mechanics: maker-context entries, TP_LIMIT_ORDERS
-#      fills, reduce-only closes, sl-external reconcile, restart-resume
-#   3. Then stage B (25% of target), then stage C (full size) — see ROADMAP
-#   4. Sizing anchored on FULL-HISTORY Sharpe (~1.2), NOT the post-2023 1.5
-# ==========================================================================
+# LIVE-FIRST program (user decision 2026-07-06; replaces the paper-first
+# track): full $2300 at UNIT WEIGHTS — backtest dMDD -6.0% / worst month
+# -1.7% at this sizing, so the shakedown risks ~$140 worst-path while
+# gathering REAL fills. See research/ROADMAP.md "Phase 6" for the L1/L2/L3
+# stages and the pre-registered kill criteria (book -8% from start halts).
+# The vol dial (x2.1+) comes ONLY after L1+L2 are green — sizing anchored on
+# full-history Sharpe ~1.2, not the post-2023 1.5.
 #
 # Book: MAJORS8 x {triple_bidir tp6, pullback_in_trend} at 50/50 capital,
-# full adopted overlay stack + REGIME_CONF_SIZING + TP_LIMIT_ORDERS.
-# Same stack as the paper compose; the ONLY differences are MODE=live,
-# key passthrough, and TP_LIMIT_ORDERS=1.
+# full adopted overlay stack + REGIME_CONF_SIZING + TP_LIMIT_ORDERS +
+# ENTRY_LIMIT_ORDERS (post-only maker entries — the engine's adopted cost
+# model; unit-tested in test_maker_entries.py).
+#
+# Splits: BTC legs $300, the other 14 legs $121 (2x300 + 14x121 = $2294).
+# BTC's 0.001 lot (~$64 notional) would coarsely round or skip risk-scaled
+# entries at an equal $143 split; $300 keeps its sizing honest.
 #
 # Ops rules (see memory/FINDINGS):
 #   - trading key lives ONLY on the EC2 box, IP-whitelisted, trade-only
@@ -52,10 +51,14 @@ x-bot: &bot-defaults
     CHOP_RISK_MULT: "0.5"
     VOL_TARGET_ANN: "0.60"
     REGIME_CONF_SIZING: "1"
-    # TP as resting maker limit (engine tp_as_limit parity). Stage A verifies
-    # the first real fill before scaling; set "0" to fall back to conditional
-    # market TPs if Bybit rejects the Partial/Limit attach on any symbol.
+    # TP as resting maker limit (engine tp_as_limit parity). L1 verifies the
+    # first real fill; set "0" to fall back to conditional market TPs if
+    # Bybit rejects the Partial/Limit attach on any symbol.
     TP_LIMIT_ORDERS: "1"
+    # Post-only maker entries (engine maker_close parity): limit at signal
+    # close, rests one bar, miss is missed. Set "0" to fall back to market
+    # entries (costs ~4bp+slip more per entry; expectations shift down).
+    ENTRY_LIMIT_ORDERS: "1"
     TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
     TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
   logging:
@@ -72,8 +75,9 @@ x-pull: &pull-env
   <<: *env-defaults
   STRATEGY_PRESET: pullback_bidir_4h
 
-# LEG4H_LIVE_EQUITY: per-service capital. Stage A: ~15 (near exchange
-# minimums). Stage B: target/4/16. Stage C: target/16.
+# Per-service capital (L1 = full book at unit weights): BTC legs
+# BTC4H_LIVE_EQUITY (default 300), all other legs LEG4H_LIVE_EQUITY
+# (default 121). The vol dial in L3 scales these, nothing else.
 services:
   btc-t:
     <<: *bot-defaults
@@ -81,7 +85,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: BTC/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+      STARTING_EQUITY: ${BTC4H_LIVE_EQUITY:-300}
     volumes: [live_btc_t_state:/app/state, live_btc_t_logs:/app/logs, live4h_cache:/app/.cache]
   btc-p:
     <<: *bot-defaults
@@ -89,7 +93,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: BTC/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+      STARTING_EQUITY: ${BTC4H_LIVE_EQUITY:-300}
     volumes: [live_btc_p_state:/app/state, live_btc_p_logs:/app/logs, live4h_cache:/app/.cache]
 
   eth-t:
@@ -98,7 +102,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: ETH/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-121}
     volumes: [live_eth_t_state:/app/state, live_eth_t_logs:/app/logs, live4h_cache:/app/.cache]
   eth-p:
     <<: *bot-defaults
@@ -106,7 +110,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: ETH/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-121}
     volumes: [live_eth_p_state:/app/state, live_eth_p_logs:/app/logs, live4h_cache:/app/.cache]
 
   sol-t:
@@ -115,7 +119,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: SOL/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-121}
     volumes: [live_sol_t_state:/app/state, live_sol_t_logs:/app/logs, live4h_cache:/app/.cache]
   sol-p:
     <<: *bot-defaults
@@ -123,7 +127,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: SOL/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-121}
     volumes: [live_sol_p_state:/app/state, live_sol_p_logs:/app/logs, live4h_cache:/app/.cache]
 
   xrp-t:
@@ -132,7 +136,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: XRP/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-121}
     volumes: [live_xrp_t_state:/app/state, live_xrp_t_logs:/app/logs, live4h_cache:/app/.cache]
   xrp-p:
     <<: *bot-defaults
@@ -140,7 +144,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: XRP/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-121}
     volumes: [live_xrp_p_state:/app/state, live_xrp_p_logs:/app/logs, live4h_cache:/app/.cache]
 
   doge-t:
@@ -149,7 +153,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: DOGE/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-121}
     volumes: [live_doge_t_state:/app/state, live_doge_t_logs:/app/logs, live4h_cache:/app/.cache]
   doge-p:
     <<: *bot-defaults
@@ -157,7 +161,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: DOGE/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-121}
     volumes: [live_doge_p_state:/app/state, live_doge_p_logs:/app/logs, live4h_cache:/app/.cache]
 
   ada-t:
@@ -166,7 +170,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: ADA/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-121}
     volumes: [live_ada_t_state:/app/state, live_ada_t_logs:/app/logs, live4h_cache:/app/.cache]
   ada-p:
     <<: *bot-defaults
@@ -174,7 +178,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: ADA/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-121}
     volumes: [live_ada_p_state:/app/state, live_ada_p_logs:/app/logs, live4h_cache:/app/.cache]
 
   link-t:
@@ -183,7 +187,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: LINK/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-121}
     volumes: [live_link_t_state:/app/state, live_link_t_logs:/app/logs, live4h_cache:/app/.cache]
   link-p:
     <<: *bot-defaults
@@ -191,7 +195,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: LINK/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-121}
     volumes: [live_link_p_state:/app/state, live_link_p_logs:/app/logs, live4h_cache:/app/.cache]
 
   avax-t:
@@ -200,7 +204,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: AVAX/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-121}
     volumes: [live_avax_t_state:/app/state, live_avax_t_logs:/app/logs, live4h_cache:/app/.cache]
   avax-p:
     <<: *bot-defaults
@@ -208,7 +212,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: AVAX/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-121}
     volumes: [live_avax_p_state:/app/state, live_avax_p_logs:/app/logs, live4h_cache:/app/.cache]
 
 volumes:

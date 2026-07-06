@@ -165,34 +165,42 @@ Gate status at program start:
   pre **−2.57** (2024+-concentrated — same disease as the sleeves, small
   2022–23 sample). The blend passes because triple carries the bad era.
 
-### Green-light criteria (ALL required, in order)
+### Green-light criteria — LIVE-FIRST track (user decision 2026-07-06;
+### supersedes the paper-first P1–P4 sequence)
 
-- [ ] **P1 — Paper record**: ≥4 weeks on docker-compose.bidir4h-paper.yml.
-      Weekly reconcile vs fixed-engine expectations: trade counts, entry
-      prices vs signal closes, exit reasons. Zero unexplained divergences.
-- [ ] **P2 — Stage A (mechanics, ~2 weeks)**: live compose with
-      LEG4H_LIVE_EQUITY≈15 (near exchange minimums; total at risk ≈ $240).
-      Purpose is ORDER MECHANICS, not P&L: first TP_LIMIT_ORDERS fill
-      verified on Bybit (Partial/Limit attach accepted on all 8 symbols),
-      reduce-only closes, sl-external reconcile, restart-resume, no
-      min-notional rejects at this size. Any Bybit rejection of the limit-TP
-      attach → set TP_LIMIT_ORDERS=0 (falls back to conditional market) and
-      re-run tp_limit.py economics before proceeding.
-- [ ] **P3 — Stage B (25% size, 2–4 weeks)**: LEG4H_LIVE_EQUITY = target/64.
-      Compare live fills vs paper vs engine: entry slippage vs signal close,
-      TP maker-fill rate, funding paid. Feed measured slippage back into the
-      cost model (ROADMAP Phase 2 open item) — if measured costs degrade the
-      edge >0.2 Sh, STOP and re-price.
-- [ ] **P4 — Stage C (full size)**: only after P3 numbers match the model.
-      Sizing anchored on FULL-HISTORY Sh ~1.2 (not post-2023 1.5): start at
-      the 15% vol dial (x2.1 gross, expect ~15–20%/y honest, dMDD ~−10%);
-      the 25% dial (x3.6) is a SEPARATE later decision after ≥1 quarter of
-      live record matching expectations.
+Rationale: at UNIT weights the book's backtest dMDD is −6.0% / worst month
+−1.7% (~$140 / ~$40 on $2300) — a price worth paying for real fills, which
+paper mode cannot produce (it simulates them). What live-first does NOT do
+is shorten the calendar: the weeks still pass before any vol dial.
+
+Execution readiness (done before L1): maker entries (ENTRY_LIMIT_ORDERS,
+post-only at signal close, one-bar rest, partials closed not adopted,
+fill-bar TP suppressed — test_maker_entries.py, 9 cases) + TP limit orders
+(TP_LIMIT_ORDERS) + CONF sizing, all wired in the live compose. Splits:
+BTC legs $300 (0.001-lot ≈ $64 granularity), other legs $121.
+
+- [ ] **L1 — Live shakedown (≥2 weeks, full $2300 at UNIT weights)**:
+      week-1 checklist — post-only entries accepted (postonly-reject rate
+      logged), first maker entry fill, first TP-limit fill, Partial/Limit
+      attach accepted on all 8 symbols, reduce-only closes, sl-external
+      reconcile, restart-resume with a resting order, min-notional skips
+      rare. Any Bybit rejection of an order type → flip that flag to "0"
+      (documented fallbacks in the compose) and note the economics delta.
+- [ ] **L2 — Measurement (2–4 more weeks, same size)**: weekly reconcile of
+      live decisions vs fixed-engine expectations; measured entry-fill rate
+      vs the engine's strict-penetration assumption; measured slippage/fees/
+      funding fed back into the cost model. If measured costs degrade the
+      edge >0.2 Sh, HALT and re-price.
+- [ ] **L3 — Vol dial**: only after L1+L2 green. Sizing anchored on
+      FULL-HISTORY Sh ~1.2 (not post-2023 1.5): first the 15% dial (x2.1,
+      expect ~15–20%/y honest, dMDD ~−10%); the 25% dial (x3.6) is a
+      SEPARATE decision after ≥1 quarter of live record matching the model.
 
 ### Standing kill / demotion criteria (pre-registered NOW, not on the day)
 
-- Book-level: live drawdown from deploy exceeding −15% → halt new entries,
-  full review before restart (at the 15% dial this is ~2x the backtest dMDD).
+- Book-level: at UNIT weights (L1/L2) a drawdown from deploy exceeding −8%
+  (≈$185, ~1.3x backtest dMDD) → halt new entries, full review. At the 15%
+  dial (L3) the halt line is −15%.
 - PULL leg: if its live+paper Sharpe over the trailing 3 months is < 0 →
   demote to BLEND75 (pre-registered fallback) or triple-only; the leg's
   pre-2023 record earns it zero benefit of the doubt.

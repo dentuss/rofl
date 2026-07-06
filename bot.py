@@ -265,6 +265,11 @@ class BotConfig:
     # Off by default; enable in live only after the stage-A minimum-size
     # smoke test (ROADMAP Phase 6). No effect in paper mode.
     tp_limit_orders: bool = os.getenv("TP_LIMIT_ORDERS", "0") == "1"
+    # Post-only maker ENTRIES (engine parity for entry_style="maker_close",
+    # the adopted cost model): limit at the signal bar's close, resting for
+    # exactly one bar; unfilled -> cancelled, a persisting signal re-places
+    # at the next close. Live mode only; paper behavior unchanged.
+    entry_limit_orders: bool = os.getenv("ENTRY_LIMIT_ORDERS", "0") == "1"
     # Vol-targeted sizing (honest-era adoption 2026-07-05, vol_target.py):
     # scale risk by clip(target / trailing-30d-annualized-vol, 0.5, 1.5),
     # vol from COMPLETE daily closes only (parity with the backtest's
@@ -419,6 +424,12 @@ class Position:
     notional: float
     bars_open: int = 0
     order_id: Optional[str] = None
+    # True when opened via a post-only maker entry (ENTRY_LIMIT_ORDERS). The
+    # fill happened MID-bar, so a TP print on the fill bar may predate the
+    # fill — check_exit suppresses the bar-based TP check on that first bar
+    # (engine parity: maker entries never credit a same-bar TP; the exchange
+    # TP order is the source of truth and reconcile books real fills).
+    maker_entry: bool = False
 
 
 @dataclass
@@ -436,6 +447,10 @@ class State:
     # new same-side entry is blocked after a stop-loss on that side. 0 = no block.
     block_long_until_ts: int = 0
     block_short_until_ts: int = 0
+    # ENTRY_LIMIT_ORDERS: resting post-only entry, checked every tick and
+    # finalized (cancel / adopt) at the next bar close. Keys: order_id, side,
+    # qty, limit_px, sl, tp, signal_bar_ts, risk_pct, created_ts.
+    pending_entry: Optional[dict] = None
 
     def to_json(self) -> str:
         d = asdict(self)
@@ -461,6 +476,7 @@ class State:
             day_start_equity=d.get("day_start_equity", d["equity"]),
             block_long_until_ts=d.get("block_long_until_ts", 0),
             block_short_until_ts=d.get("block_short_until_ts", 0),
+            pending_entry=d.get("pending_entry"),
         )
 
     def save(self, path: str) -> None:
@@ -697,6 +713,51 @@ class Exchange:
             params["reduceOnly"] = True
         return self._ccxt.create_market_sell_order(self._ccxt_symbol(), qty,
                                                     params=self._ccxt_params(params))
+
+    def limit_entry(self, side: int, qty: float, price: float,
+                    sl: float | None, tp: float | None) -> dict:
+        """Post-only limit ENTRY at `price` with attached SL/TP (live only —
+        callers gate on mode). postOnly guarantees maker-or-cancel: if the
+        price would cross the book, Bybit rejects instead of taking."""
+        params = self._attached_sltp_params(sl, tp, qty=qty)
+        params["postOnly"] = True
+        px = self._round_price(price)
+        if side == 1:
+            return self._ccxt.create_limit_buy_order(
+                self._ccxt_symbol(), qty, px, params=self._ccxt_params(params))
+        return self._ccxt.create_limit_sell_order(
+            self._ccxt_symbol(), qty, px, params=self._ccxt_params(params))
+
+    def fetch_order_status(self, order_id: str) -> dict:
+        """Normalized order status: {status: open|closed|canceled|rejected|
+        unknown, filled: float, avg_px: float|None}."""
+        o = self._ccxt.fetch_order(order_id, self._ccxt_symbol(),
+                                   params=self._ccxt_params())
+        status = (o.get("status") or "unknown").lower()
+        filled = float(o.get("filled") or 0.0)
+        avg = o.get("average")
+        return {"status": status, "filled": filled,
+                "avg_px": float(avg) if avg else None}
+
+    def cancel_order(self, order_id: str) -> bool:
+        """Best-effort cancel. False (not an exception) when the order is
+        already gone — filled or cancelled — so callers re-check status."""
+        try:
+            self._ccxt.cancel_order(order_id, self._ccxt_symbol(),
+                                    params=self._ccxt_params())
+            return True
+        except Exception as e:
+            self.log.info(f"cancel_order {order_id}: {e} (already gone?)")
+            return False
+
+    def cancel_all(self) -> None:
+        """Fail-safe sweep of resting orders for our symbol (used when a
+        limit-entry placement raises after possibly reaching the exchange)."""
+        try:
+            self._ccxt.cancel_all_orders(self._ccxt_symbol(),
+                                         params=self._ccxt_params())
+        except Exception as e:
+            self.log.warning(f"cancel_all failed: {e}")
 
     def fetch_position_size(self, retries: int = 2) -> float | None:
         """Net signed position size on the exchange (long > 0, short < 0).
@@ -1001,15 +1062,22 @@ class Bot:
         if pos is None:
             return None
         h, l, c = float(last_bar["high"]), float(last_bar["low"]), float(last_bar["close"])
+        # Maker fills happen MID-bar: a TP print on the fill bar may predate
+        # the fill, so the bar-based TP check is unreliable there. Suppress it
+        # (engine parity: maker entries never credit a same-bar TP). A REAL
+        # post-fill TP fills the exchange-side TP order and is booked by the
+        # reconcile path instead. The same-bar SL stays honored (any path to
+        # the stop passed through the fill first).
+        suppress_tp = getattr(pos, "maker_entry", False) and pos.bars_open <= 1
         if pos.side == 1:
             if l <= pos.sl:
                 return "sl"
-            if h >= pos.tp:
+            if h >= pos.tp and not suppress_tp:
                 return "tp"
         else:  # short — used by triple_bidir and any preset with allow_short=True
             if h >= pos.sl:
                 return "sl"
-            if l <= pos.tp:
+            if l <= pos.tp and not suppress_tp:
                 return "tp"
         if pos.bars_open >= self.cfg.max_bars_in_trade:
             return "time"
@@ -1165,6 +1233,11 @@ class Bot:
         tp = signal_info["tp"]
         if sl is None or tp is None or side == 0:
             return
+        if self.state.pending_entry is not None:
+            # A maker entry is still resting; the rollover finalizer clears
+            # it before any new placement. Never stack orders.
+            self.log.info("entry skipped: a maker entry is already resting")
+            return
         # Post-stop same-side re-entry cooldown (see close_position). Block a new
         # same-side entry until the recorded bar timestamp. Skip BEFORE touching
         # the exchange so a blocked entry costs no API call.
@@ -1177,7 +1250,17 @@ class Bot:
                 return
         if self._daily_loss_blocked():
             return
-        entry_px = self.ex.fetch_price()
+        # Maker mode: size and price at the SIGNAL bar's close (the engine's
+        # maker_close limit price). Taker mode: at the current ticker.
+        maker_mode = self.cfg.entry_limit_orders and self.cfg.mode == "live"
+        if maker_mode and signal_info.get("close"):
+            entry_px = float(signal_info["close"])
+        else:
+            if maker_mode:
+                self.log.warning("maker entry: signal close missing — "
+                                 "taker fallback for this entry")
+                maker_mode = False
+            entry_px = self.ex.fetch_price()
         stop_dist = abs(entry_px - sl) / entry_px
         if stop_dist < 1e-5:
             self.log.warning("stop too tight, skipping")
@@ -1222,6 +1305,41 @@ class Bot:
         # dropping it below the risk-target size. Recompute notional from the
         # ACTUAL qty so fees / pnl% / risk accounting reflect the real position.
         notional = qty * entry_px
+        if maker_mode:
+            # Post-only limit at the signal close; rests for exactly one bar.
+            # A reject (price already crossed) is a MISSED entry — the engine
+            # models the same miss; a persisting signal retries next bar.
+            try:
+                order = self.ex.limit_entry(side, qty, entry_px, sl, tp)
+            except Exception as e:
+                self.log.info(f"maker entry not placed ({e}) — postonly reject "
+                              f"or API error; sweeping + skipping this bar")
+                self.ex.cancel_all()
+                net = self.ex.fetch_position_size()
+                if net is not None and abs(net) > 1e-9:
+                    self.log.critical(f"ORPHAN POSITION after failed maker "
+                                      f"entry (net={net}); force-closing")
+                    try:
+                        if net > 0:
+                            self.ex.market_sell(abs(net), reduce_only=True)
+                        else:
+                            self.ex.market_buy(abs(net), reduce_only=True)
+                    except Exception as e2:
+                        self.log.critical(f"force-close FAILED: {e2} — MANUAL "
+                                          f"INTERVENTION required")
+                return
+            self.state.pending_entry = {
+                "order_id": order.get("id"), "side": side, "qty": qty,
+                "limit_px": entry_px, "sl": sl, "tp": tp,
+                "signal_bar_ts": int(bar_ts or 0), "risk_pct": risk,
+                "created_ts": int(time.time()),
+            }
+            self.state.save(self.cfg.state_file)
+            self.log.info(
+                f"PENDING {('LONG' if side == 1 else 'SHORT')} maker limit "
+                f"{qty:.6f} @ {entry_px:.4f} sl={sl:.4f} tp={tp:.4f} "
+                f"(rests until next bar close)")
+            return
         try:
             order = (self.ex.market_buy(qty, sl=sl, tp=tp) if side == 1
                      else self.ex.market_sell(qty, sl=sl, tp=tp))
@@ -1307,6 +1425,118 @@ class Bot:
                          + ("" if close_bar_ts else " (no fill ts — cooldown not armed)"))
         self.close_position(real["exit_px"], "sl-external", bar_ts=close_bar_ts)
         return True
+
+    # --- maker-entry (post-only) lifecycle ------------------------------------
+    def _adopt_pending_fill(self, pe: dict, qty: float,
+                            avg_px: float | None) -> None:
+        """A resting maker entry filled — promote it to a tracked Position.
+        The attached SL/TP went live with the fill, so the position was never
+        unprotected."""
+        fill_px = float(avg_px or pe["limit_px"])
+        notional = qty * fill_px
+        self.state.position = Position(
+            side=int(pe["side"]), qty=qty, entry_px=fill_px,
+            sl=float(pe["sl"]), tp=float(pe["tp"]), open_ts=int(time.time()),
+            notional=notional, bars_open=0, order_id=pe.get("order_id"),
+            maker_entry=True,
+        )
+        self.state.pending_entry = None
+        self.state.save(self.cfg.state_file)
+        side = int(pe["side"])
+        self.log.info(
+            f"OPEN {('LONG' if side == 1 else 'SHORT')} (maker fill) "
+            f"{qty:.6f} @ {fill_px:.4f} sl={pe['sl']:.4f} tp={pe['tp']:.4f} "
+            f"notional={notional:.2f} equity={self.state.equity:.2f}")
+        self.events.entry(side=side, qty=qty, entry_px=fill_px,
+                          sl=pe["sl"], tp=pe["tp"], notional=notional,
+                          risk_pct=pe.get("risk_pct"),
+                          equity=self.state.equity, symbol=self.cfg.symbol,
+                          preset=self.cfg.preset, regime=self._last_regime)
+        try:
+            self.notifier.trade_open(side=side, qty=qty, price=fill_px,
+                                     sl=pe["sl"], tp=pe["tp"],
+                                     notional=notional,
+                                     risk=pe.get("risk_pct") or 0.0,
+                                     equity=self.state.equity,
+                                     symbol=self.cfg.symbol)
+        except Exception as e:
+            self.log.warning(f"notifier trade_open failed: {e}")
+
+    def _close_partial_entry(self, pe: dict, filled: float) -> None:
+        """v1 policy: a PARTIALLY filled maker entry is closed immediately
+        (reduce-only) instead of adopted — the attached tpSize/slSize were
+        sized for the full qty, and running a position whose exchange-side
+        protection is mis-sized is the ambiguity class behind past incidents.
+        Rare (tiny orders on liquid perps at a traded-through level); costs
+        one taker round-trip on a fraction of one leg. Revisit if the L1
+        shakedown shows partials are common."""
+        self.log.warning(f"partial maker fill {filled:.6f}/{pe['qty']:.6f} — "
+                         f"closing the partial (v1 policy: no mis-protected "
+                         f"positions)")
+        try:
+            if int(pe["side"]) == 1:
+                self.ex.market_sell(filled, reduce_only=True)
+            else:
+                self.ex.market_buy(filled, reduce_only=True)
+        except Exception as e:
+            self.log.critical(f"partial-entry close FAILED: {e} — check "
+                              f"{self.cfg.symbol} on Bybit manually")
+            try:
+                self.notifier.error(f"{self.cfg.symbol}: partial maker entry "
+                                    f"close failed — manual check needed")
+            except Exception:
+                pass
+
+    def _check_pending_entry(self, rollover: bool = False) -> None:
+        """Track the resting post-only entry. Every tick: adopt a fill
+        promptly. At bar rollover: the engine's one-bar rest is over —
+        cancel whatever still rests (a persisting signal re-places at the
+        new close via the normal entry path)."""
+        pe = self.state.pending_entry
+        if pe is None:
+            return
+        try:
+            st = self.ex.fetch_order_status(pe["order_id"])
+        except Exception as e:
+            self.log.warning(f"pending-entry status check failed: {e}")
+            if not rollover:
+                return                      # transient — retry next tick
+            st = {"status": "unknown", "filled": 0.0, "avg_px": None}
+        filled = float(st.get("filled") or 0.0)
+        full = filled >= float(pe["qty"]) * 0.999
+        if st["status"] == "closed" or full:
+            self._adopt_pending_fill(pe, filled if filled > 0 else
+                                     float(pe["qty"]), st.get("avg_px"))
+            return
+        if st["status"] in ("canceled", "cancelled", "rejected", "expired"):
+            if filled > 1e-12:
+                self._close_partial_entry(pe, filled)
+            else:
+                self.log.info("maker entry gone unfilled (reject/cancel) — "
+                              "missed entry, engine models the same miss")
+            self.state.pending_entry = None
+            self.state.save(self.cfg.state_file)
+            return
+        if not rollover:
+            return                           # still resting mid-bar — fine
+        # Bar rolled over: cancel, then re-check once (cancel/fill race).
+        self.ex.cancel_order(pe["order_id"])
+        try:
+            st2 = self.ex.fetch_order_status(pe["order_id"])
+        except Exception:
+            st2 = {"status": "unknown", "filled": filled, "avg_px": None}
+        filled2 = float(st2.get("filled") or 0.0)
+        if st2["status"] == "closed" or filled2 >= float(pe["qty"]) * 0.999:
+            self._adopt_pending_fill(pe, filled2 if filled2 > 0 else
+                                     float(pe["qty"]), st2.get("avg_px"))
+            return
+        if filled2 > 1e-12:
+            self._close_partial_entry(pe, filled2)
+        else:
+            self.log.info(f"maker entry unfilled after one bar @ "
+                          f"{pe['limit_px']:.4f} — cancelled (miss is missed)")
+        self.state.pending_entry = None
+        self.state.save(self.cfg.state_file)
 
     def close_position(self, exit_px_hint: float, reason: str,
                        bar_ts: int | None = None) -> None:
@@ -1505,6 +1735,13 @@ class Bot:
         self._maybe_emit_daily_summary()
         self._roll_day()
 
+        # Resting maker entry: check every tick so a fill is adopted (and its
+        # TP/SL tracking starts) within one poll, not at the next bar close.
+        # Also the resume path: a pending order in restored state is picked
+        # up here on the first tick after a restart.
+        if self.cfg.entry_limit_orders and self.state.pending_entry is not None:
+            self._check_pending_entry(rollover=False)
+
         # Bar-close gate: signals only change at bar close. With 5+ portfolio
         # bots polling every ~30s, fetching 300 bars on EVERY tick burns
         # through exchange rate limits (Bybit retCode 10006) — but on 1h
@@ -1536,6 +1773,14 @@ class Bot:
             self._vt_mult = vol_target_mult(df["close"], self.cfg.vol_target_ann)
         last_bar = df.iloc[-1]
         bar_ts = int(df.index[-1].timestamp())
+
+        # 0) A maker entry rests for exactly ONE bar (engine parity): when a
+        #    new bar has closed since it was placed, finalize it — adopt a
+        #    fill or cancel the rest. A persisting signal re-places at the
+        #    new close in step 2.
+        if self.cfg.entry_limit_orders and self.state.pending_entry is not None \
+                and bar_ts > int(self.state.pending_entry.get("signal_bar_ts") or 0):
+            self._check_pending_entry(rollover=True)
 
         # 1) If we have a position, check exits on the just-closed bar
         if self.state.position is not None and bar_ts > self.state.last_bar_ts:
