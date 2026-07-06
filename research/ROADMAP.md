@@ -78,16 +78,30 @@ Fees were 73% of gross on 1h and are still the largest cost line on 4h.
 - [ ] Structural-universe study: define liquidity/mcap criteria EX-ANTE, test
       the resulting fixed majors basket (BTC/ETH/SOL-class) vs EW5
 
-## Phase 4 — Signal frontier
+## Phase 4 — Signal frontier (DONE 2026-07-06)
 
-- [ ] Honest walk-forward param re-tune on 4h (retune.py machinery, fixed
-      engine, gates G1–G4) — current params were tuned under the artifact
-- [ ] 1d arm + 4h/1d ensemble (entries on 4h, exposure scaled by 1d state)
-- [ ] Entry family variants: pullback-in-trend vs breakout; donchian on 4h
-- [ ] Universe expansion: the 20 viable names from expand_universe.py on the
-      4h stack → portfolio breadth is the cheapest Sharpe there is
-- [ ] Regime layer upgrades (the GMM is the strongest verified layer):
-      finer features, per-pair vs pooled fits, confidence-weighted sizing
+- [x] Honest walk-forward param re-tune on 4h — **REJECTED**: stitched WF
+      (27-combo grid, trailing 365d, 90d refits, zero look-ahead) Sh 1.15
+      vs FIXED (9,26,55) 1.36; params churn at ~70% of refits. Frozen params
+      confirmed honestly (wf_retune4h.py)
+- [x] 1d arm + 4h/1d ensemble — **REJECTED**: D1 Sh 0.69–0.83, corr to 4h
+      book +0.6; both blends dilute (1.25/1.33 vs 1.36). The 4h clock
+      dominates (arm_1d.py)
+- [x] Entry family bake-off — donchian (OOS-negative), EMA/ST/MACD/BB all
+      fail to beat triple as replacements; **pullback-in-trend ADOPTED via
+      blend** — G3 98th pct, corr 0.17, MDD −2.1%; promoted stack
+      BLEND50_CONF Sh 1.47 / MDD −4.8% (entry_families.py,
+      pullback_validation.py, phase4_promote.py)
+- [x] Universe expansion — reframed structurally (the "20 viable names" were
+      performance-picked = illegal): MAJORS12/16 by ex-ante liquidity
+      **dilute monotonically** (1.10/0.93 vs MAJORS8 1.36). Cutoff stays 8
+      (structural_breadth.py)
+- [x] Regime layer upgrades — **CONF sizing ADOPTED** (posterior-confidence
+      risk mult, better on every metric in two runs); BTC-pooled clock
+      REJECTED (1.06); finer features deferred (regime_upgrades.py)
+- [ ] LIVE WIRING for the promoted stack: pullback preset in bot.py, CONF
+      sizing (needs walk-forward proba in the live regime path), two-book
+      blend allocation — paper program should reflect BLEND50_CONF
 
 ## Phase 5 — Capital efficiency (how real systems reach 30–70%)
 
@@ -134,3 +148,4 @@ Fees were 73% of gross on 1h and are still the largest cost line on 4h.
 | 2026-07-05 | EW5 / RSCD3 + **vol targeting** | 20.6% | 1.41 | −9.6% | IS 1.37 → OOS 1.54; G4 ✓ all books | adopted layer |
 | 2026-07-05 | **MAJORS8 / RSCD3+VT** (ex-ante liquidity top-8) | 20.0% | 1.42 | −8.0% | IS 1.38 → OOS 1.41 | **trend-sleeve BASELINE** |
 | 2026-07-05 | **3-SLEEVE PORTFOLIO** (trend + TSMOM-90 + carry, inverse-vol) | vol-dial | **1.55** | mo −0.8% @ unit wts | IS 1.36 → **OOS 2.01**, thirds +1.54/+1.38/+1.82 | **PORTFOLIO TARGET — needs carry/TSMOM execution engineering + paper** |
+| 2026-07-06 | **TRIPLE+PULL BLEND50 + CONF sizing** (Phase-4 promotion) | 10.5% @ unit wts (vol-dial) | **1.47** | −4.8% | PULL G3 98th pct; IS 1.53 → OOS 1.43; thirds +2.40/+0.79/+1.46 | **new trend-book BASELINE — needs PULL preset + CONF + blend live wiring** |
