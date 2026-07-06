@@ -260,6 +260,11 @@ class BotConfig:
     # live regime label (the research validation used walk-forward fits —
     # same acknowledged approximation as the label itself).
     regime_conf_sizing: bool = os.getenv("REGIME_CONF_SIZING", "0") == "1"
+    # TP as a resting LIMIT order on the exchange (engine parity for
+    # tp_as_limit, adopted 2026-07-06 — maker fee on the profit side).
+    # Off by default; enable in live only after the stage-A minimum-size
+    # smoke test (ROADMAP Phase 6). No effect in paper mode.
+    tp_limit_orders: bool = os.getenv("TP_LIMIT_ORDERS", "0") == "1"
     # Vol-targeted sizing (honest-era adoption 2026-07-05, vol_target.py):
     # scale risk by clip(target / trailing-30d-annualized-vol, 0.5, 1.5),
     # vol from COMPLETE daily closes only (parity with the backtest's
@@ -636,11 +641,20 @@ class Exchange:
                 self.log.warning(f"ccxt fetch_ticker failed ({e}); using last close")
         return float(self.fetch_recent(1)["close"].iloc[-1])
 
-    def _attached_sltp_params(self, sl: float | None, tp: float | None) -> dict:
+    def _attached_sltp_params(self, sl: float | None, tp: float | None,
+                              qty: float | None = None) -> dict:
         """Build ccxt params to attach SL/TP to the entry order.
         Bybit V5 accepts stopLoss/takeProfit on the entry; the exchange then
         manages the conditional orders autonomously, so the position is
-        protected even if the bot is down."""
+        protected even if the bot is down.
+
+        TP_LIMIT_ORDERS=1 (engine parity for tp_as_limit, adopted 2026-07-06):
+        the TP becomes a LIMIT order at the target (maker 0.02%) instead of
+        the default conditional market (taker 0.055% + slip). Bybit requires
+        tpslMode=Partial for limit-type TPs; tpSize/slSize are set to the
+        full order qty so the whole position stays covered and OCO semantics
+        hold (either side filling cancels the other). The SL stays a market
+        conditional — stops must never rest as limits."""
         if sl is None and tp is None or self.paper:
             return {}
         params: dict = {}
@@ -648,6 +662,13 @@ class Exchange:
             params["stopLoss"] = self._round_price(sl)
         if tp is not None:
             params["takeProfit"] = self._round_price(tp)
+            if self.cfg.tp_limit_orders and qty is not None:
+                params["tpslMode"] = "Partial"
+                params["tpOrderType"] = "Limit"
+                params["tpLimitPrice"] = self._round_price(tp)
+                params["tpSize"] = qty
+                if sl is not None:
+                    params["slSize"] = qty
         return params
 
     def market_buy(self, qty: float, sl: float | None = None,
@@ -655,7 +676,7 @@ class Exchange:
         if self.paper:
             px = self.fetch_price()
             return {"id": f"paper-{int(time.time())}", "price": px, "amount": qty}
-        params = self._attached_sltp_params(sl, tp)
+        params = self._attached_sltp_params(sl, tp, qty=qty)
         if reduce_only:
             # Closes MUST be reduce-only. If the exchange already flattened the
             # position (its attached SL/TP fired autonomously), a plain market
@@ -671,7 +692,7 @@ class Exchange:
         if self.paper:
             px = self.fetch_price()
             return {"id": f"paper-{int(time.time())}", "price": px, "amount": qty}
-        params = self._attached_sltp_params(sl, tp)
+        params = self._attached_sltp_params(sl, tp, qty=qty)
         if reduce_only:  # see market_buy: never let a close re-open a position
             params["reduceOnly"] = True
         return self._ccxt.create_market_sell_order(self._ccxt_symbol(), qty,

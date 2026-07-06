@@ -149,6 +149,68 @@ Fees were 73% of gross on 1h and are still the largest cost line on 4h.
       component currently eligible for leverage talk; the vol dial (x2-x4)
       is where the 20-40% CAGR lives once the paper record confirms.
 
+## Phase 6 — Go-live program (real margin; NO RUSH — every stage gates the next)
+
+The user's standing decision (2026-07-06): live deploy happens on real margin
+when — and only when — every criterion below is green. Files are prepared and
+versioned in advance: docker-compose.bidir4h-live.yml (MODE=live, DO NOT
+START header) mirrors the paper compose + TP_LIMIT_ORDERS.
+
+Gate status at program start:
+- G1–G5 all green on the promoted BLEND50_CONF stack (incl. exec parity on
+  the pullback leg).
+- **Long-history gate: PASS** (trend_longhist.py): blend full +1.20, pre-
+  2023-08 +0.18, post +1.68, MDD −6.0% at unit weights on the expanding
+  book. Decomposition: TRIPLE leg pre **+0.57** (all-weather core); PULL leg
+  pre **−2.57** (2024+-concentrated — same disease as the sleeves, small
+  2022–23 sample). The blend passes because triple carries the bad era.
+
+### Green-light criteria (ALL required, in order)
+
+- [ ] **P1 — Paper record**: ≥4 weeks on docker-compose.bidir4h-paper.yml.
+      Weekly reconcile vs fixed-engine expectations: trade counts, entry
+      prices vs signal closes, exit reasons. Zero unexplained divergences.
+- [ ] **P2 — Stage A (mechanics, ~2 weeks)**: live compose with
+      LEG4H_LIVE_EQUITY≈15 (near exchange minimums; total at risk ≈ $240).
+      Purpose is ORDER MECHANICS, not P&L: first TP_LIMIT_ORDERS fill
+      verified on Bybit (Partial/Limit attach accepted on all 8 symbols),
+      reduce-only closes, sl-external reconcile, restart-resume, no
+      min-notional rejects at this size. Any Bybit rejection of the limit-TP
+      attach → set TP_LIMIT_ORDERS=0 (falls back to conditional market) and
+      re-run tp_limit.py economics before proceeding.
+- [ ] **P3 — Stage B (25% size, 2–4 weeks)**: LEG4H_LIVE_EQUITY = target/64.
+      Compare live fills vs paper vs engine: entry slippage vs signal close,
+      TP maker-fill rate, funding paid. Feed measured slippage back into the
+      cost model (ROADMAP Phase 2 open item) — if measured costs degrade the
+      edge >0.2 Sh, STOP and re-price.
+- [ ] **P4 — Stage C (full size)**: only after P3 numbers match the model.
+      Sizing anchored on FULL-HISTORY Sh ~1.2 (not post-2023 1.5): start at
+      the 15% vol dial (x2.1 gross, expect ~15–20%/y honest, dMDD ~−10%);
+      the 25% dial (x3.6) is a SEPARATE later decision after ≥1 quarter of
+      live record matching expectations.
+
+### Standing kill / demotion criteria (pre-registered NOW, not on the day)
+
+- Book-level: live drawdown from deploy exceeding −15% → halt new entries,
+  full review before restart (at the 15% dial this is ~2x the backtest dMDD).
+- PULL leg: if its live+paper Sharpe over the trailing 3 months is < 0 →
+  demote to BLEND75 (pre-registered fallback) or triple-only; the leg's
+  pre-2023 record earns it zero benefit of the doubt.
+- Parity: any UNEXPECTED exec divergence (not flip-cascade/entry-skip/
+  cooldown classified) → halt, diagnose, fix, re-run test_exec_parity.py
+  before resuming.
+- Ops (unchanged laws): trading key only on EC2, IP-whitelisted, trade-only
+  permissions; closes reduce-only; never two live portfolios at once; the
+  paper stack may keep running (holds no keys).
+
+### While the clock runs
+
+- sleeves_paper.py daily + weekly carry rebalance tracking (their only path
+  back in is this forward record).
+- Frontier research continues (third orthogonal leg, regime features) — but
+  NOTHING joins the live book without the full gate battery + its own paper
+  period.
+
 ## Scoreboard (fixed engine, full costs, SOFT5 unless noted)
 
 | date | config | CAGR | Sh(mo) | MDD | gates | status |

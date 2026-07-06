@@ -1,0 +1,247 @@
+# 4h LIVE portfolio — the promoted BLEND50_CONF trend book, REAL MONEY.
+#
+# ============================ DO NOT START YET ============================
+# This file exists so the go-live path is reviewed and versioned BEFORE the
+# green light — not improvised on deploy day. Start it ONLY when every
+# criterion in research/ROADMAP.md "Phase 6 — Go-live program" is met:
+#   1. >= 4 weeks green paper record on docker-compose.bidir4h-paper.yml
+#      (weekly reconcile vs fixed-engine expectations, no unexplained drift)
+#   2. Stage A first: MIN_NOTIONAL smoke run (LEG4H_EQUITY tiny) for ~2 weeks
+#      to prove real order mechanics: maker-context entries, TP_LIMIT_ORDERS
+#      fills, reduce-only closes, sl-external reconcile, restart-resume
+#   3. Then stage B (25% of target), then stage C (full size) — see ROADMAP
+#   4. Sizing anchored on FULL-HISTORY Sharpe (~1.2), NOT the post-2023 1.5
+# ==========================================================================
+#
+# Book: MAJORS8 x {triple_bidir tp6, pullback_in_trend} at 50/50 capital,
+# full adopted overlay stack + REGIME_CONF_SIZING + TP_LIMIT_ORDERS.
+# Same stack as the paper compose; the ONLY differences are MODE=live,
+# key passthrough, and TP_LIMIT_ORDERS=1.
+#
+# Ops rules (see memory/FINDINGS):
+#   - trading key lives ONLY on the EC2 box, IP-whitelisted, trade-only
+#     permissions (NO withdrawal); keys via env (API_KEY/API_SECRET), never
+#     in this file
+#   - NEVER run this alongside any other LIVE portfolio (the paper stack
+#     rofl4h-* is fine — it holds no keys and touches nothing)
+#   - all closes are reduce-only (bot enforces; do not override)
+#
+# Run (on the EC2 box, after the green light):
+#   docker compose -f docker-compose.bidir4h-live.yml up -d --build
+#   docker compose -f docker-compose.bidir4h-live.yml logs -f
+#   docker compose -f docker-compose.bidir4h-live.yml down
+
+x-bot: &bot-defaults
+  build: .
+  image: rofl-bot:latest
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD-SHELL", "[ $(($(date +%s) - $(stat -c %Y /app/state/heartbeat 2>/dev/null || echo 0))) -lt 300 ]"]
+    interval: 60s
+    timeout: 5s
+    retries: 3
+    start_period: 180s
+  environment: &env-defaults
+    MODE: live
+    EXCHANGE: ${EXCHANGE:-bybit}
+    API_KEY: ${API_KEY:-}
+    API_SECRET: ${API_SECRET:-}
+    POLL_SECONDS: ${POLL_SECONDS:-30}
+    TL_TP_MULT: "6.0"
+    COOLDOWN_BARS: "2"                       # == engine K=3 (signal-bar gate)
+    CHOP_RISK_MULT: "0.5"
+    VOL_TARGET_ANN: "0.60"
+    REGIME_CONF_SIZING: "1"
+    # TP as resting maker limit (engine tp_as_limit parity). Stage A verifies
+    # the first real fill before scaling; set "0" to fall back to conditional
+    # market TPs if Bybit rejects the Partial/Limit attach on any symbol.
+    TP_LIMIT_ORDERS: "1"
+    TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+x-triple: &triple-env
+  <<: *env-defaults
+  STRATEGY_PRESET: adaptive_bidir_4h
+
+x-pull: &pull-env
+  <<: *env-defaults
+  STRATEGY_PRESET: pullback_bidir_4h
+
+# LEG4H_LIVE_EQUITY: per-service capital. Stage A: ~15 (near exchange
+# minimums). Stage B: target/4/16. Stage C: target/16.
+services:
+  btc-t:
+    <<: *bot-defaults
+    container_name: rofl4hL-btc-t
+    environment:
+      <<: *triple-env
+      SYMBOL: BTC/USDT
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+    volumes: [live_btc_t_state:/app/state, live_btc_t_logs:/app/logs, live4h_cache:/app/.cache]
+  btc-p:
+    <<: *bot-defaults
+    container_name: rofl4hL-btc-p
+    environment:
+      <<: *pull-env
+      SYMBOL: BTC/USDT
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+    volumes: [live_btc_p_state:/app/state, live_btc_p_logs:/app/logs, live4h_cache:/app/.cache]
+
+  eth-t:
+    <<: *bot-defaults
+    container_name: rofl4hL-eth-t
+    environment:
+      <<: *triple-env
+      SYMBOL: ETH/USDT
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+    volumes: [live_eth_t_state:/app/state, live_eth_t_logs:/app/logs, live4h_cache:/app/.cache]
+  eth-p:
+    <<: *bot-defaults
+    container_name: rofl4hL-eth-p
+    environment:
+      <<: *pull-env
+      SYMBOL: ETH/USDT
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+    volumes: [live_eth_p_state:/app/state, live_eth_p_logs:/app/logs, live4h_cache:/app/.cache]
+
+  sol-t:
+    <<: *bot-defaults
+    container_name: rofl4hL-sol-t
+    environment:
+      <<: *triple-env
+      SYMBOL: SOL/USDT
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+    volumes: [live_sol_t_state:/app/state, live_sol_t_logs:/app/logs, live4h_cache:/app/.cache]
+  sol-p:
+    <<: *bot-defaults
+    container_name: rofl4hL-sol-p
+    environment:
+      <<: *pull-env
+      SYMBOL: SOL/USDT
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+    volumes: [live_sol_p_state:/app/state, live_sol_p_logs:/app/logs, live4h_cache:/app/.cache]
+
+  xrp-t:
+    <<: *bot-defaults
+    container_name: rofl4hL-xrp-t
+    environment:
+      <<: *triple-env
+      SYMBOL: XRP/USDT
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+    volumes: [live_xrp_t_state:/app/state, live_xrp_t_logs:/app/logs, live4h_cache:/app/.cache]
+  xrp-p:
+    <<: *bot-defaults
+    container_name: rofl4hL-xrp-p
+    environment:
+      <<: *pull-env
+      SYMBOL: XRP/USDT
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+    volumes: [live_xrp_p_state:/app/state, live_xrp_p_logs:/app/logs, live4h_cache:/app/.cache]
+
+  doge-t:
+    <<: *bot-defaults
+    container_name: rofl4hL-doge-t
+    environment:
+      <<: *triple-env
+      SYMBOL: DOGE/USDT
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+    volumes: [live_doge_t_state:/app/state, live_doge_t_logs:/app/logs, live4h_cache:/app/.cache]
+  doge-p:
+    <<: *bot-defaults
+    container_name: rofl4hL-doge-p
+    environment:
+      <<: *pull-env
+      SYMBOL: DOGE/USDT
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+    volumes: [live_doge_p_state:/app/state, live_doge_p_logs:/app/logs, live4h_cache:/app/.cache]
+
+  ada-t:
+    <<: *bot-defaults
+    container_name: rofl4hL-ada-t
+    environment:
+      <<: *triple-env
+      SYMBOL: ADA/USDT
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+    volumes: [live_ada_t_state:/app/state, live_ada_t_logs:/app/logs, live4h_cache:/app/.cache]
+  ada-p:
+    <<: *bot-defaults
+    container_name: rofl4hL-ada-p
+    environment:
+      <<: *pull-env
+      SYMBOL: ADA/USDT
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+    volumes: [live_ada_p_state:/app/state, live_ada_p_logs:/app/logs, live4h_cache:/app/.cache]
+
+  link-t:
+    <<: *bot-defaults
+    container_name: rofl4hL-link-t
+    environment:
+      <<: *triple-env
+      SYMBOL: LINK/USDT
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+    volumes: [live_link_t_state:/app/state, live_link_t_logs:/app/logs, live4h_cache:/app/.cache]
+  link-p:
+    <<: *bot-defaults
+    container_name: rofl4hL-link-p
+    environment:
+      <<: *pull-env
+      SYMBOL: LINK/USDT
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+    volumes: [live_link_p_state:/app/state, live_link_p_logs:/app/logs, live4h_cache:/app/.cache]
+
+  avax-t:
+    <<: *bot-defaults
+    container_name: rofl4hL-avax-t
+    environment:
+      <<: *triple-env
+      SYMBOL: AVAX/USDT
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+    volumes: [live_avax_t_state:/app/state, live_avax_t_logs:/app/logs, live4h_cache:/app/.cache]
+  avax-p:
+    <<: *bot-defaults
+    container_name: rofl4hL-avax-p
+    environment:
+      <<: *pull-env
+      SYMBOL: AVAX/USDT
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-15}
+    volumes: [live_avax_p_state:/app/state, live_avax_p_logs:/app/logs, live4h_cache:/app/.cache]
+
+volumes:
+  live_btc_t_state:
+  live_btc_t_logs:
+  live_btc_p_state:
+  live_btc_p_logs:
+  live_eth_t_state:
+  live_eth_t_logs:
+  live_eth_p_state:
+  live_eth_p_logs:
+  live_sol_t_state:
+  live_sol_t_logs:
+  live_sol_p_state:
+  live_sol_p_logs:
+  live_xrp_t_state:
+  live_xrp_t_logs:
+  live_xrp_p_state:
+  live_xrp_p_logs:
+  live_doge_t_state:
+  live_doge_t_logs:
+  live_doge_p_state:
+  live_doge_p_logs:
+  live_ada_t_state:
+  live_ada_t_logs:
+  live_ada_p_state:
+  live_ada_p_logs:
+  live_link_t_state:
+  live_link_t_logs:
+  live_link_p_state:
+  live_link_p_logs:
+  live_avax_t_state:
+  live_avax_t_logs:
+  live_avax_p_state:
+  live_avax_p_logs:
+  live4h_cache:
