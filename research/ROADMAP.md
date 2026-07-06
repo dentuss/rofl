@@ -110,8 +110,15 @@ Fees were 73% of gross on 1h and are still the largest cost line on 4h.
 - [x] Daily-granularity path: @25% vol dMDD −13.4% (month-end said −6.0%),
       @50% dMDD −25.8% / worst day −20.9% / x14.4 gross — tail-risk math
       says 50% vol is liquidation-adjacent on a fresh outlier day
-- [ ] Sleeve redesign round: diagnose the pre-2023 bleed; regime-gated
-      carry (skip when dispersion is thin), vol-filtered TSMOM
+- [x] Sleeve redesign round — **FAILED** (2026-07-06): dispersion-gated
+      carry, strength-masked TSMOM and calm-filtered TSMOM all fail the
+      full-history gate (best: CARRY_GATED full +0.26 / pre −0.40, and it
+      kills 2025). Diagnosis: carry's edge is a thin-dispersion 2024+
+      phenomenon (corr to lagged dispersion −0.27 — hypothesis refuted);
+      TSMOM earns in big-move months (corr +0.25 to |BTC|) so vol-filtering
+      trims the wrong months; 2021 universe was half-thin (13/23 names).
+      No exploitable structure in the bleed → sleeves stay prove-it-forward,
+      leverage stays blocked (sleeve_diagnosis.py)
 - [ ] Only after forward paper evidence: sizing-up discussion. The
       trend book (fully gated, Sh 1.42) is the only component currently
       eligible for leverage talk.
