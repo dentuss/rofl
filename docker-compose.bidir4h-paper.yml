@@ -201,6 +201,41 @@ services:
       STARTING_EQUITY: ${LEG4H_EQUITY:-143}
     volumes: [avax_p_state:/app/state, avax_p_logs:/app/logs, shared4h_cache:/app/.cache]
 
+  # Telegram button panel (Stats / Positions / Today / Health). No keys in
+  # this file, so it runs booked-only — exactly what paper needs.
+  tg-control:
+    build: .
+    image: rofl-bot:latest
+    container_name: rofl4h-tg
+    restart: unless-stopped
+    command: ["python3", "tg_control.py"]
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      STATES_DIR: /states
+    volumes:
+      - btc_t_state:/states/btc-t:ro
+      - btc_p_state:/states/btc-p:ro
+      - eth_t_state:/states/eth-t:ro
+      - eth_p_state:/states/eth-p:ro
+      - sol_t_state:/states/sol-t:ro
+      - sol_p_state:/states/sol-p:ro
+      - xrp_t_state:/states/xrp-t:ro
+      - xrp_p_state:/states/xrp-p:ro
+      - doge_t_state:/states/doge-t:ro
+      - doge_p_state:/states/doge-p:ro
+      - ada_t_state:/states/ada-t:ro
+      - ada_p_state:/states/ada-p:ro
+      - link_t_state:/states/link-t:ro
+      - link_p_state:/states/link-p:ro
+      - avax_t_state:/states/avax-t:ro
+      - avax_p_state:/states/avax-p:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
 volumes:
   btc_t_state:
   btc_t_logs:

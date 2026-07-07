@@ -17,6 +17,17 @@
 # BTC's 0.001 lot (~$64 notional) would coarsely round or skip risk-scaled
 # entries at an equal $143 split; $300 keeps its sizing honest.
 #
+# TWO ACCOUNTS — REQUIRED, NOT OPTIONAL. The -t and -p legs trade the SAME
+# symbols; two bots on one account would NET against each other (a pullback
+# short would reduce the triple long) and trip every reconcile guard
+# (Pattern A). Before L1:
+#   1. create a Bybit SUB-ACCOUNT for the pullback book
+#   2. transfer the p-book capital to it ($300 + 7x$121 = $1,147)
+#   3. cut an IP-whitelisted, trade-only key for it
+#   4. export PULL_API_KEY / PULL_API_SECRET on the EC2 box
+# The -t legs use API_KEY/API_SECRET (main), the -p legs use PULL_API_KEY/
+# PULL_API_SECRET (sub). tg-control reads both (API_KEY2 = the sub key).
+#
 # Ops rules (see memory/FINDINGS):
 #   - trading key lives ONLY on the EC2 box, IP-whitelisted, trade-only
 #     permissions (NO withdrawal); keys via env (API_KEY/API_SECRET), never
@@ -74,6 +85,10 @@ x-triple: &triple-env
 x-pull: &pull-env
   <<: *env-defaults
   STRATEGY_PRESET: pullback_bidir_4h
+  # SUB-ACCOUNT key — see the two-accounts header block. Empty = the -p legs
+  # refuse to trade live (ccxt auth fails loudly), which is the safe default.
+  API_KEY: ${PULL_API_KEY:-}
+  API_SECRET: ${PULL_API_SECRET:-}
 
 # Per-service capital (L1 = full book at unit weights): BTC legs
 # BTC4H_LIVE_EQUITY (default 300), all other legs LEG4H_LIVE_EQUITY
@@ -214,6 +229,47 @@ services:
       SYMBOL: AVAX/USDT
       STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-121}
     volumes: [live_avax_p_state:/app/state, live_avax_p_logs:/app/logs, live4h_cache:/app/.cache]
+
+  # Telegram button panel (Stats / Positions / Today / Health / Reconcile).
+  # READ-ONLY: state files mounted ro, only Bybit read endpoints called.
+  # API_KEY/SECRET -> main (triple) account, API_KEY2/SECRET2 -> pull sub.
+  tg-control:
+    build: .
+    image: rofl-bot:latest
+    container_name: rofl4hL-tg
+    restart: unless-stopped
+    command: ["python3", "tg_control.py"]
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      EXCHANGE: ${EXCHANGE:-bybit}
+      STATES_DIR: /states
+      API_KEY: ${API_KEY:-}
+      API_SECRET: ${API_SECRET:-}
+      API_KEY2: ${PULL_API_KEY:-}
+      API_SECRET2: ${PULL_API_SECRET:-}
+    volumes:
+      - live_btc_t_state:/states/btc-t:ro
+      - live_btc_p_state:/states/btc-p:ro
+      - live_eth_t_state:/states/eth-t:ro
+      - live_eth_p_state:/states/eth-p:ro
+      - live_sol_t_state:/states/sol-t:ro
+      - live_sol_p_state:/states/sol-p:ro
+      - live_xrp_t_state:/states/xrp-t:ro
+      - live_xrp_p_state:/states/xrp-p:ro
+      - live_doge_t_state:/states/doge-t:ro
+      - live_doge_p_state:/states/doge-p:ro
+      - live_ada_t_state:/states/ada-t:ro
+      - live_ada_p_state:/states/ada-p:ro
+      - live_link_t_state:/states/link-t:ro
+      - live_link_p_state:/states/link-p:ro
+      - live_avax_t_state:/states/avax-t:ro
+      - live_avax_p_state:/states/avax-p:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
 volumes:
   live_btc_t_state:

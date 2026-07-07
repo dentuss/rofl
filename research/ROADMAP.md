@@ -179,12 +179,21 @@ fill-bar TP suppressed — test_maker_entries.py, 9 cases) + TP limit orders
 (TP_LIMIT_ORDERS) + CONF sizing, all wired in the live compose. Splits:
 BTC legs $300 (0.001-lot ≈ $64 granularity), other legs $121.
 
+- [ ] **L0 — Account isolation (one-time, before L1)**: the -t and -p legs
+      trade the SAME symbols; on one account they would net against each
+      other and trip every reconcile guard (Pattern A). Create a Bybit
+      SUB-ACCOUNT for the pullback book, transfer $1,147 ($300 + 7×$121),
+      cut an IP-whitelisted trade-only key, export PULL_API_KEY/
+      PULL_API_SECRET. tg-control reads both accounts (API_KEY2 = sub key)
+      and aggregates equity/positions in one panel.
 - [ ] **L1 — Live shakedown (≥2 weeks, full $2300 at UNIT weights)**:
       week-1 checklist — post-only entries accepted (postonly-reject rate
       logged), first maker entry fill, first TP-limit fill, Partial/Limit
       attach accepted on all 8 symbols, reduce-only closes, sl-external
       reconcile, restart-resume with a resting order, min-notional skips
-      rare. Any Bybit rejection of an order type → flip that flag to "0"
+      rare, and LEG ISOLATION verified: a -t and a -p position coexisting
+      on the same symbol (opposite sides included) with zero reconcile
+      conflicts — possible only because of L0. Any Bybit rejection of an order type → flip that flag to "0"
       (documented fallbacks in the compose) and note the economics delta.
 - [ ] **L2 — Measurement (2–4 more weeks, same size)**: weekly reconcile of
       live decisions vs fixed-engine expectations; measured entry-fill rate

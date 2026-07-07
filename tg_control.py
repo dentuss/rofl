@@ -43,9 +43,14 @@ EXCHANGE = os.getenv("EXCHANGE", "bybit").lower()
 POLL_TIMEOUT = int(os.getenv("TG_POLL_TIMEOUT", "30"))
 API = f"https://api.telegram.org/bot{TOKEN}"
 
-# bot dir -> display symbol. Dirs that don't exist are skipped silently, so this
-# works for the 5-pair and 8-pair portfolios alike (extras just no-op).
-BOT_ORDER = ["inj", "sol", "ada", "eth", "link",
+# bot dir -> display order. Dirs that don't exist are skipped silently, so this
+# works for every portfolio generation (extras are appended alphabetically).
+# The 4h BLEND50_CONF stack uses <sym>-t (triple leg) / <sym>-p (pullback leg).
+BOT_ORDER = ["btc-t", "btc-p", "eth-t", "eth-p", "sol-t", "sol-p",
+             "xrp-t", "xrp-p", "doge-t", "doge-p", "ada-t", "ada-p",
+             "link-t", "link-p", "avax-t", "avax-p",
+             # legacy single-leg portfolios
+             "inj", "sol", "ada", "eth", "link",
              "avax", "near", "aave", "grt", "rune", "doge"]
 
 MENU = {"inline_keyboard": [
@@ -111,7 +116,7 @@ def read_bots() -> list[dict]:
         peak = float(d.get("equity_peak", eq) or eq)
         bots.append({
             "name": name.upper(),
-            "symbol": f"{name.upper()}/USDT",
+            "symbol": f"{name.split('-')[0].upper()}/USDT",
             "equity": eq,
             "peak": peak,
             "dd": (eq / peak - 1) if peak > 0 else 0.0,
@@ -127,62 +132,81 @@ def read_bots() -> list[dict]:
 
 
 # --------------------------- Bybit read-only -------------------------------
-_ex = None
+# The BLEND50_CONF live stack runs TWO accounts: main = triple book,
+# sub-account = pullback book (two bots must never share a symbol on one
+# account — netting + reconcile collide). API_KEY/API_SECRET -> main,
+# API_KEY2/API_SECRET2 -> sub. Either may be absent (that account degrades
+# to booked-only views).
+_clients = None
 
 
-def bybit():
-    """Lazy read-only ccxt client. Returns None if keys missing (booked-only) or
-    on a transient init failure — the latter is retried on the next call so a
-    network blip at startup doesn't permanently degrade the live views."""
-    global _ex
-    if _ex is not None:
-        return _ex
-    key, sec = os.getenv("API_KEY", ""), os.getenv("API_SECRET", "")
-    if not (key and sec):
-        return None
-    try:
-        import ccxt
-        ex = ccxt.bybit({"apiKey": key, "secret": sec, "enableRateLimit": True,
-                         "options": {"defaultType": "swap", "recvWindow": 60000,
-                                     "adjustForTimeDifference": True}})
-        ex.load_time_difference()   # absorb local clock skew (see bybit-clock-skew)
-        _ex = ex
-    except Exception as e:
-        log.warning(f"bybit client init failed (will retry next call): {e}")
-        return None
-    return _ex
+def bybit_clients():
+    """Lazy read-only ccxt clients, one per configured account. Returns [] if
+    no keys; a transient init failure is retried on the next call."""
+    global _clients
+    if _clients is not None:
+        return _clients
+    built, failed = [], False
+    for tag, key, sec in (
+            ("main", os.getenv("API_KEY", ""), os.getenv("API_SECRET", "")),
+            ("sub", os.getenv("API_KEY2", ""), os.getenv("API_SECRET2", ""))):
+        if not (key and sec):
+            continue
+        try:
+            import ccxt
+            ex = ccxt.bybit({"apiKey": key, "secret": sec,
+                             "enableRateLimit": True,
+                             "options": {"defaultType": "swap",
+                                         "recvWindow": 60000,
+                                         "adjustForTimeDifference": True}})
+            ex.load_time_difference()   # absorb clock skew (bybit-clock-skew)
+            built.append((tag, ex))
+        except Exception as e:
+            log.warning(f"bybit {tag} client init failed (retry next call): {e}")
+            failed = True
+    if not failed:                       # cache only a complete build
+        _clients = built
+    return built
 
 
 def real_wallet_equity():
-    ex = bybit()
-    if ex is None:
+    clients = bybit_clients()
+    if not clients:
         return None
-    try:
-        wb = ex.private_get_v5_account_wallet_balance({"accountType": "UNIFIED"})
-        return float(wb["result"]["list"][0]["totalEquity"])
-    except Exception as e:
-        log.warning(f"wallet balance failed: {e}")
-        return None
+    total, got = 0.0, False
+    for tag, ex in clients:
+        try:
+            wb = ex.private_get_v5_account_wallet_balance({"accountType": "UNIFIED"})
+            total += float(wb["result"]["list"][0]["totalEquity"])
+            got = True
+        except Exception as e:
+            log.warning(f"wallet balance ({tag}) failed: {e}")
+    return total if got else None
 
 
 def real_positions():
-    ex = bybit()
-    if ex is None:
+    clients = bybit_clients()
+    if not clients:
         return None
-    try:
-        resp = ex.private_get_v5_position_list({"category": "linear", "settleCoin": "USDT"})
-        out = []
-        for p in resp["result"]["list"]:
-            if float(p.get("size") or 0) == 0:
-                continue
-            out.append({"symbol": p["symbol"], "side": p["side"],
-                        "size": float(p["size"]), "entry": float(p.get("avgPrice") or 0),
-                        "upnl": float(p.get("unrealisedPnl") or 0),
-                        "sl": p.get("stopLoss") or "-", "tp": p.get("takeProfit") or "-"})
-        return out
-    except Exception as e:
-        log.warning(f"position list failed: {e}")
-        return None
+    out, got = [], False
+    for tag, ex in clients:
+        try:
+            resp = ex.private_get_v5_position_list({"category": "linear",
+                                                    "settleCoin": "USDT"})
+            got = True
+            for p in resp["result"]["list"]:
+                if float(p.get("size") or 0) == 0:
+                    continue
+                sym = p["symbol"] + (" ·sub" if tag == "sub" else "")
+                out.append({"symbol": sym, "side": p["side"],
+                            "size": float(p["size"]),
+                            "entry": float(p.get("avgPrice") or 0),
+                            "upnl": float(p.get("unrealisedPnl") or 0),
+                            "sl": p.get("stopLoss") or "-",
+                            "tp": p.get("takeProfit") or "-"})
+        except Exception as e:
+            log.warning(f"position list ({tag}) failed: {e}")
+    return out if got else None
 
 
 # --------------------------- Renderers -------------------------------------
@@ -202,9 +226,9 @@ def render_stats() -> str:
     if real is not None:
         lines.append(f"real Bybit equity: *{real:.2f}*  (gap {tot_eq - real:+.2f})")
     lines.append("")
-    lines.append("`bot    equity    realised    DD`")
+    lines.append("`bot      equity    realised    DD`")
     for b in bots:
-        lines.append(f"`{b['name']:<5} {b['equity']:>7.2f}   {b['realised_pnl']:>+7.2f}"
+        lines.append(f"`{b['name']:<7} {b['equity']:>7.2f}   {b['realised_pnl']:>+7.2f}"
                      f"   {b['dd']*100:>5.1f}%`")
     return "\n".join(lines)
 
@@ -245,10 +269,10 @@ def render_today() -> str:
     lines = ["🗓 *Today / PnL*",
              f"today: *{day_pnl:+.2f}* USDT (since UTC midnight)",
              f"all-time realised: *{tot_pnl:+.2f}*  over *{tot_tr}* trades", "",
-             "`bot    today      all-time`"]
+             "`bot      today      all-time`"]
     for b in bots:
         d = b["equity"] - b["day_start_equity"]
-        lines.append(f"`{b['name']:<5} {d:>+7.2f}    {b['realised_pnl']:>+7.2f}`")
+        lines.append(f"`{b['name']:<7} {d:>+7.2f}    {b['realised_pnl']:>+7.2f}`")
     return "\n".join(lines)
 
 
@@ -270,7 +294,7 @@ def render_health() -> str:
             tag, hb_s = "🛑 STALE", f"{hb//60}m"
         bar_age = (now - b["last_bar_ts"]) // 60 if b["last_bar_ts"] else None
         bar_s = f"{bar_age}m" if bar_age is not None else "?"
-        lines.append(f"{tag} `{b['name']:<5}` hb {hb_s:<5} last bar {bar_s} ago")
+        lines.append(f"{tag} `{b['name']:<7}` hb {hb_s:<5} last bar {bar_s} ago")
     lines.append("\n_Note: an in-memory HALT isn't visible here — check logs if a bot "
                  "is alive but not trading._")
     return "\n".join(lines)
