@@ -480,9 +480,14 @@ class State:
         )
 
     def save(self, path: str) -> None:
+        """Atomic write (tmp + replace): a crash mid-write must never leave a
+        truncated state.json — with a live position that would crash-loop the
+        restarted bot while the position runs unmanaged."""
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(self.to_json())
+        tmp = p.parent / f"{p.name}.tmp{os.getpid()}"
+        tmp.write_text(self.to_json())
+        os.replace(tmp, p)
 
 
 # ----------------------------- Logging --------------------------------------
@@ -736,8 +741,10 @@ class Exchange:
         status = (o.get("status") or "unknown").lower()
         filled = float(o.get("filled") or 0.0)
         avg = o.get("average")
+        ts = o.get("lastTradeTimestamp") or o.get("timestamp")
         return {"status": status, "filled": filled,
-                "avg_px": float(avg) if avg else None}
+                "avg_px": float(avg) if avg else None,
+                "ts_ms": int(ts) if ts else None}
 
     def cancel_order(self, order_id: str) -> bool:
         """Best-effort cancel. False (not an exception) when the order is
@@ -1420,23 +1427,31 @@ class Bot:
         bar_sec = Exchange.TF_SECONDS.get(self.cfg.timeframe, 3600)
         fill_ms = real.get("updated_ms")
         close_bar_ts = (int(fill_ms) // 1000 // bar_sec * bar_sec) if fill_ms else None
+        # Classify by fill proximity (same rule as the mid-run reconcile): a
+        # TP that filled while we were down must NOT arm the SL cooldown.
+        why = "sl-external" if abs(real["exit_px"] - p.sl) <= \
+            abs(real["exit_px"] - p.tp) else "tp-external"
         self.log.warning(f"position in state but exchange flat — SL/TP fired while "
-                         f"down; booking real close at {real['exit_px']:.4f}"
+                         f"down; booking real close at {real['exit_px']:.4f} ({why})"
                          + ("" if close_bar_ts else " (no fill ts — cooldown not armed)"))
-        self.close_position(real["exit_px"], "sl-external", bar_ts=close_bar_ts)
+        self.close_position(real["exit_px"], why, bar_ts=close_bar_ts)
         return True
 
     # --- maker-entry (post-only) lifecycle ------------------------------------
     def _adopt_pending_fill(self, pe: dict, qty: float,
-                            avg_px: float | None) -> None:
+                            avg_px: float | None,
+                            fill_ms: int | None = None) -> None:
         """A resting maker entry filled — promote it to a tracked Position.
         The attached SL/TP went live with the fill, so the position was never
-        unprotected."""
+        unprotected. open_ts uses the exchange's fill timestamp when known
+        (a fill during downtime must not look freshly opened — it would skew
+        time-exit counting and closed-PnL lookups)."""
         fill_px = float(avg_px or pe["limit_px"])
         notional = qty * fill_px
+        open_ts = int(fill_ms // 1000) if fill_ms else int(time.time())
         self.state.position = Position(
             side=int(pe["side"]), qty=qty, entry_px=fill_px,
-            sl=float(pe["sl"]), tp=float(pe["tp"]), open_ts=int(time.time()),
+            sl=float(pe["sl"]), tp=float(pe["tp"]), open_ts=open_ts,
             notional=notional, bars_open=0, order_id=pe.get("order_id"),
             maker_entry=True,
         )
@@ -1499,6 +1514,7 @@ class Bot:
             st = self.ex.fetch_order_status(pe["order_id"])
         except Exception as e:
             self.log.warning(f"pending-entry status check failed: {e}")
+            self._warn_stale_pending(pe)
             if not rollover:
                 return                      # transient — retry next tick
             st = {"status": "unknown", "filled": 0.0, "avg_px": None}
@@ -1506,7 +1522,8 @@ class Bot:
         full = filled >= float(pe["qty"]) * 0.999
         if st["status"] == "closed" or full:
             self._adopt_pending_fill(pe, filled if filled > 0 else
-                                     float(pe["qty"]), st.get("avg_px"))
+                                     float(pe["qty"]), st.get("avg_px"),
+                                     fill_ms=st.get("ts_ms"))
             return
         if st["status"] in ("canceled", "cancelled", "rejected", "expired"):
             if filled > 1e-12:
@@ -1523,12 +1540,26 @@ class Bot:
         self.ex.cancel_order(pe["order_id"])
         try:
             st2 = self.ex.fetch_order_status(pe["order_id"])
-        except Exception:
-            st2 = {"status": "unknown", "filled": filled, "avg_px": None}
+        except Exception as e:
+            # Terminal state UNKNOWN: never assume "unfilled" — clearing a
+            # FILLED order here would leave a live, untracked position on the
+            # exchange. Keep the pending (the resting-order guard blocks new
+            # entries) and let the every-tick check retry until the API
+            # answers; escalate if it stays unknowable.
+            self.log.warning(f"pending-entry final status unknown ({e}) — "
+                             f"keeping it for retry; entries stay blocked")
+            self._warn_stale_pending(pe)
+            return
+        if st2["status"] == "unknown":
+            self.log.warning("pending-entry final status unknown — keeping "
+                             "it for retry; entries stay blocked")
+            self._warn_stale_pending(pe)
+            return
         filled2 = float(st2.get("filled") or 0.0)
         if st2["status"] == "closed" or filled2 >= float(pe["qty"]) * 0.999:
             self._adopt_pending_fill(pe, filled2 if filled2 > 0 else
-                                     float(pe["qty"]), st2.get("avg_px"))
+                                     float(pe["qty"]), st2.get("avg_px"),
+                                     fill_ms=st2.get("ts_ms"))
             return
         if filled2 > 1e-12:
             self._close_partial_entry(pe, filled2)
@@ -1537,6 +1568,25 @@ class Bot:
                           f"{pe['limit_px']:.4f} — cancelled (miss is missed)")
         self.state.pending_entry = None
         self.state.save(self.cfg.state_file)
+
+    def _warn_stale_pending(self, pe: dict) -> None:
+        """Escalate ONCE when a pending order's status has been unknowable
+        for more than ~2 bars — entries are blocked until it resolves, so a
+        persistent API failure needs human eyes, not silence."""
+        bar_sec = Exchange.TF_SECONDS.get(self.cfg.timeframe, 3600)
+        if pe.get("stale_warned") or \
+                time.time() - int(pe.get("created_ts") or 0) < 2 * bar_sec:
+            return
+        pe["stale_warned"] = True
+        self.state.save(self.cfg.state_file)
+        self.log.critical(f"pending maker entry {pe.get('order_id')} status "
+                          f"unknown for >2 bars — entries blocked; check "
+                          f"{self.cfg.symbol} on Bybit")
+        try:
+            self.notifier.error(f"{self.cfg.symbol}: pending entry status "
+                                f"unknown >2 bars — manual check needed")
+        except Exception:
+            pass
 
     def close_position(self, exit_px_hint: float, reason: str,
                        bar_ts: int | None = None) -> None:
@@ -1985,6 +2035,32 @@ class Bot:
                     try: self.notifier.error(f"unexpected extra size on "
                                              f"{self.cfg.symbol}; bot HALTED, manual review")
                     except Exception: pass
+        elif self.cfg.mode == "live" and self.state.pending_entry is None:
+            # FLAT state, live mode: sweep the crash window. A previous
+            # process may have placed an order (or had a fill land) and died
+            # before state.save — the exchange would hold a resting order or
+            # a position this fresh state knows nothing about. Cancel any
+            # resting orders (safe: state tracks none) and HALT on an
+            # untracked position rather than trade around it. Skipped when a
+            # pending is tracked — cancel_all would kill our own order.
+            try:
+                self.ex.cancel_all()
+                net = self.ex.fetch_position_size()
+                if net is not None and abs(net) > 1e-9:
+                    self._halted = True
+                    self._halt_reason = (f"untracked position at startup "
+                                         f"(net={net:+.6f}) with flat state")
+                    self.log.critical(
+                        f"UNTRACKED POSITION at startup (net={net:+.6f}) with "
+                        f"flat state — HALTED; reconcile {self.cfg.symbol} "
+                        f"manually and restart")
+                    try:
+                        self.notifier.error(f"{self.cfg.symbol}: untracked "
+                                            f"position at startup; bot HALTED")
+                    except Exception:
+                        pass
+            except Exception as e:
+                self.log.warning(f"startup flat-state sweep failed: {e}")
         while not self._stop:
             try:
                 self.tick()

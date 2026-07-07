@@ -55,6 +55,8 @@ class StubEx:
         return {"id": f"ord-{len(self.placed)}"}
 
     def fetch_order_status(self, order_id):
+        if getattr(self, "raise_on_status", False):
+            raise RuntimeError("api down")
         if self.status_queue:
             return self.status_queue.pop(0)
         return {"status": "open", "filled": 0.0, "avg_px": None}
@@ -183,5 +185,20 @@ b.state.save(b.cfg.state_file)
 st2 = botmod.State.load(b.cfg.state_file, 100.0)
 assert st2.pending_entry == b.state.pending_entry
 print("[9] pending entry survives restart (state round-trip)  OK")
+
+# 10) UNKNOWN terminal status at rollover must KEEP the pending — a filled
+#     order assumed "unfilled" would be a live untracked position.
+b = _bot()
+b.enter_position(dict(SIG), bar_ts=1000)
+b.ex.raise_on_status = True
+b._check_pending_entry(rollover=True)
+assert b.state.pending_entry is not None, \
+    "unknown status must never clear the pending"
+assert b.state.position is None
+b.ex.raise_on_status = False              # API recovers: the fill is adopted
+b.ex.status_queue = [{"status": "closed", "filled": 0.2, "avg_px": 100.0}]
+b._check_pending_entry(rollover=False)
+assert b.state.position is not None and b.state.position.qty == 0.2
+print("[10] unknown status keeps pending; recovery adopts fill OK")
 
 print("\nALL MAKER-ENTRY TESTS PASSED")

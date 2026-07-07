@@ -376,7 +376,8 @@ def main() -> None:
     if not (TOKEN and CHAT_ID):
         log.error("TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID required; exiting.")
         return
-    log.info(f"tg_control up. states={STATES_DIR} bybit={'yes' if bybit() else 'no'}")
+    log.info(f"tg_control up. states={STATES_DIR} "
+             f"bybit accounts={len(bybit_clients())}")
     send("🤖 *rofl control* online. Send /menu for buttons.", MENU)
     offset = None
     while True:

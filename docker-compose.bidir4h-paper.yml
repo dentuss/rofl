@@ -27,9 +27,14 @@
 # Do NOT run alongside a live portfolio that shares container names — these
 # use rofl4h-* names and separate volumes. Check `docker ps` anyway.
 
+# Explicit project name + dedicated image tag — keeps this stack fully
+# isolated from the live one (project orphan-removal and image-tag reuse
+# both bite otherwise; see the live compose header).
+name: rofl4h-paper
+
 x-bot: &bot-defaults
   build: .
-  image: rofl-bot:latest
+  image: rofl-bot:4h-paper
   restart: unless-stopped
   healthcheck:
     test: ["CMD-SHELL", "[ $(($(date +%s) - $(stat -c %Y /app/state/heartbeat 2>/dev/null || echo 0))) -lt 300 ]"]
@@ -205,7 +210,7 @@ services:
   # this file, so it runs booked-only — exactly what paper needs.
   tg-control:
     build: .
-    image: rofl-bot:latest
+    image: rofl-bot:4h-paper
     container_name: rofl4h-tg
     restart: unless-stopped
     command: ["python3", "tg_control.py"]

@@ -41,9 +41,16 @@
 #   docker compose -f docker-compose.bidir4h-live.yml logs -f
 #   docker compose -f docker-compose.bidir4h-live.yml down
 
+# Explicit project name + dedicated image tag: without these, the paper and
+# live stacks share the directory-derived project ("--remove-orphans" on one
+# would DESTROY the other's containers) and the mutable rofl-bot:latest tag
+# (a paper rebuild would silently swap unvalidated code under live at the
+# next recreate).
+name: rofl4h-live
+
 x-bot: &bot-defaults
   build: .
-  image: rofl-bot:latest
+  image: rofl-bot:4h-live
   restart: unless-stopped
   healthcheck:
     test: ["CMD-SHELL", "[ $(($(date +%s) - $(stat -c %Y /app/state/heartbeat 2>/dev/null || echo 0))) -lt 300 ]"]
@@ -235,7 +242,7 @@ services:
   # API_KEY/SECRET -> main (triple) account, API_KEY2/SECRET2 -> pull sub.
   tg-control:
     build: .
-    image: rofl-bot:latest
+    image: rofl-bot:4h-live
     container_name: rofl4hL-tg
     restart: unless-stopped
     command: ["python3", "tg_control.py"]
