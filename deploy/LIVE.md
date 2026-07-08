@@ -37,8 +37,9 @@ idle `-p` containers are CORRECT, not broken.
 
 ## 1. Box prep (one-time) — `deploy/setup.sh`
 
-On a fresh EC2 instance (t4g.medium or larger — 17 containers; t4g.small
-will OOM), as `ec2-user`/`ubuntu` (not root):
+On a fresh EC2 instance — **t4g.medium WITH a 4 GB swapfile, or t4g.large**
+(17 Python containers ≈ 3.5–4.4 GB resident; see the sizing note + swap
+snippet in `deploy/README.md`) — as `ec2-user`/`ubuntu` (not root):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/dentuss/rofl/main/deploy/setup.sh | bash
