@@ -13,12 +13,29 @@ covers the box itself.
 
 | | |
 |---|---|
-| Type | **t4g.medium** or larger (17 containers; t4g.small OOMs) |
+| Type | **t4g.medium + 4 GB swap** (economical) or **t4g.large** (comfortable) — see sizing note |
 | AMI | Ubuntu 24.04 / 22.04 or Amazon Linux 2023 (arm64 or x86_64) |
-| Disk | 20 GiB gp3 |
+| Disk | 24 GiB gp3 (includes the swapfile) |
 | Region | `ap-southeast-1` (closest to Bybit) |
 | Security group | inbound: SSH from your IP only; outbound: all (bot is outbound-HTTPS only) |
 | Elastic IP | recommended — the Bybit keys are IP-whitelisted to it |
+
+**Sizing note (17 containers):** each bot is a full Python process
+(pandas + numpy + sklearn + ccxt ≈ 200–260 MB resident), so the stack wants
+~3.5–4.4 GB — right at t4g.medium's 4 GB. CPU is irrelevant (bots think for
+seconds once per 4h, staggered); memory is the constraint, and it is
+import-time/idle-resident — exactly what swap absorbs well. On a medium,
+add swap BEFORE first start:
+
+```bash
+sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+Watch `docker stats` and `free -h` in week 1; chronic swapping → resize to
+t4g.large (2-minute stop/start; the Elastic IP and volumes survive, and
+`restart: unless-stopped` brings the stack back on boot).
 
 ## Setup
 
