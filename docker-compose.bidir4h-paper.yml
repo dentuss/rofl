@@ -17,7 +17,7 @@
 # The paper period compares live fills/decisions against these numbers before
 # any real-money discussion. MODE is pinned to paper — no key passthrough.
 #
-# $2300 book / 16 services = $143 per service (equal split, 50/50 legs).
+# $2,177.56 book / 16 services = $136.10 per service (equal split).
 #
 # Run:
 #   docker compose -f docker-compose.bidir4h-paper.yml up -d --build
@@ -76,7 +76,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: BTC/USDT
-      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
     volumes: [btc_t_state:/app/state, btc_t_logs:/app/logs, shared4h_cache:/app/.cache]
   btc-p:
     <<: *bot-defaults
@@ -84,7 +84,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: BTC/USDT
-      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
     volumes: [btc_p_state:/app/state, btc_p_logs:/app/logs, shared4h_cache:/app/.cache]
 
   eth-t:
@@ -93,7 +93,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: ETH/USDT
-      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
     volumes: [eth_t_state:/app/state, eth_t_logs:/app/logs, shared4h_cache:/app/.cache]
   eth-p:
     <<: *bot-defaults
@@ -101,7 +101,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: ETH/USDT
-      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
     volumes: [eth_p_state:/app/state, eth_p_logs:/app/logs, shared4h_cache:/app/.cache]
 
   sol-t:
@@ -110,7 +110,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: SOL/USDT
-      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
     volumes: [sol_t_state:/app/state, sol_t_logs:/app/logs, shared4h_cache:/app/.cache]
   sol-p:
     <<: *bot-defaults
@@ -118,7 +118,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: SOL/USDT
-      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
     volumes: [sol_p_state:/app/state, sol_p_logs:/app/logs, shared4h_cache:/app/.cache]
 
   xrp-t:
@@ -127,7 +127,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: XRP/USDT
-      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
     volumes: [xrp_t_state:/app/state, xrp_t_logs:/app/logs, shared4h_cache:/app/.cache]
   xrp-p:
     <<: *bot-defaults
@@ -135,7 +135,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: XRP/USDT
-      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
     volumes: [xrp_p_state:/app/state, xrp_p_logs:/app/logs, shared4h_cache:/app/.cache]
 
   doge-t:
@@ -144,7 +144,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: DOGE/USDT
-      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
     volumes: [doge_t_state:/app/state, doge_t_logs:/app/logs, shared4h_cache:/app/.cache]
   doge-p:
     <<: *bot-defaults
@@ -152,7 +152,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: DOGE/USDT
-      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
     volumes: [doge_p_state:/app/state, doge_p_logs:/app/logs, shared4h_cache:/app/.cache]
 
   ada-t:
@@ -161,7 +161,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: ADA/USDT
-      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
     volumes: [ada_t_state:/app/state, ada_t_logs:/app/logs, shared4h_cache:/app/.cache]
   ada-p:
     <<: *bot-defaults
@@ -169,7 +169,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: ADA/USDT
-      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
     volumes: [ada_p_state:/app/state, ada_p_logs:/app/logs, shared4h_cache:/app/.cache]
 
   link-t:
@@ -178,7 +178,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: LINK/USDT
-      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
     volumes: [link_t_state:/app/state, link_t_logs:/app/logs, shared4h_cache:/app/.cache]
   link-p:
     <<: *bot-defaults
@@ -186,7 +186,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: LINK/USDT
-      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
     volumes: [link_p_state:/app/state, link_p_logs:/app/logs, shared4h_cache:/app/.cache]
 
   avax-t:
@@ -195,7 +195,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: AVAX/USDT
-      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
     volumes: [avax_t_state:/app/state, avax_t_logs:/app/logs, shared4h_cache:/app/.cache]
   avax-p:
     <<: *bot-defaults
@@ -203,7 +203,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: AVAX/USDT
-      STARTING_EQUITY: ${LEG4H_EQUITY:-143}
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
     volumes: [avax_p_state:/app/state, avax_p_logs:/app/logs, shared4h_cache:/app/.cache]
 
   # Telegram button panel (Stats / Positions / Today / Health). No keys in

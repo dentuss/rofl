@@ -1,49 +1,29 @@
 """Live trading bot. Paper by default; live on Bybit USDT-perps with keys.
 
-Production strategy is `triple_bidir` (long + mirror short). The long-only
-`triple_long` is the original/legacy variant, kept for the long-only presets.
-The live portfolio runs the `adaptive_bidir` preset per pair = bidir signal +
-directional regime filter + F&G 3-day persistence filter + 3-tier drawdown
-decay (see SESSION_HANDOFF.md and research/FINDINGS.md).
+One symbol per process. The DEPLOYED program (2026-07-08) is the 4h
+BLEND50_CONF book — 8 majors x two presets at 50/50 capital, launched by
+docker-compose.bidir4h-live.yml (see deploy/LIVE.md):
+  adaptive_bidir_4h   triple_bidir tp6 (EMA 9/26/50 stack + RSI 55/45 +
+                      ADX 22, sl 1.8x / tp 6x ATR via TL_TP_MULT)
+  pullback_bidir_4h   pullback_in_trend (EMA50 side + RSI 40/60 recross,
+                      same stops) — the low-correlation second leg
+plus the adopted overlay stack: walk-forward regime mask, F&G 3-day
+persistence, 3-tier drawdown decay, CHOP half-sizing (CHOP_RISK_MULT),
+vol targeting (VOL_TARGET_ANN), GMM-confidence sizing (REGIME_CONF_SIZING),
+post-SL cooldown (COOLDOWN_BARS), maker entries (ENTRY_LIMIT_ORDERS) and
+TP-as-limit exits (TP_LIMIT_ORDERS).
 
-Default mode is PAPER (dry-run). Set MODE=live and provide API keys to trade
-real money — only do this after you've reviewed the code and the risks.
+Honest expectations and every adopted/rejected layer: research/FINDINGS.md.
+Numbers in older preset comments below are ARTIFACT-ERA (pre-2026-07-05)
+and invalid — kept only as historical context on the legacy presets.
 
-Strategy: triple_bidir (long + symmetric short)
-  - EMA stack: fast > slow > trend (9/26/50)   (inverted for shorts)
-  - Momentum: RSI(14) > 55 long  /  < 45 short
-  - Trend strength: ADX(14) > 22
-  - Stops: 1.8x ATR(14)   Targets: 3.0x ATR(14)
-
-Presets (STRATEGY_PRESET env var):
-  steady (default)  ETH/USDT 1h, risk 1.5%
-                    5y: +201%, CAGR ~25%, MDD -29%, monthly median +1.4%
-  growth            SOL/USDT 30m, risk 1.5%
-                    5y: +945%, CAGR ~64%, MDD -52%, monthly median +3.0%
-  high_return       SOL/USDT 30m, risk 2.0%
-                    5y: +1842%, CAGR ~87%, MDD -63%, monthly median +3.9%
-  aggressive        SOL/USDT 30m, risk 2.5%
-                    5y: +3243%, CAGR ~109%, MDD -73%, monthly median +4.6%
-  yolo              SOL/USDT 30m, risk 3.0%
-                    5y: +5296%, CAGR ~131%, MDD -80%, monthly median +5.3%
-
-WARNING: 'aggressive' and 'yolo' have catastrophic drawdowns. The 2022 bear
-year had -43% (r=2%) to -50%+ (r=3%) for SOL 30m. With $50k capital under
-'yolo', expect to see equity drop to $10k before recovering. Only use these
-if you can stomach the variance and the strategy bottoms out.
-
-Crisis behaviour at 'steady' (vs buy & hold ETH):
-  China mining ban (May-Jul 2021):  +1.9% strategy vs -39% B&H
-  2022 bear market:                +25.5% strategy vs -68% B&H
-  Terra/Luna (May 2022):            no losses
-  FTX collapse (Nov 2022):          flat strategy vs -24% B&H
+Default mode is PAPER (dry-run). MODE=live + keys trades real money; the
+go-live program (research/ROADMAP.md Phase 6) gates when that is allowed.
 
 Run:
-  python3 bot.py                       # default = steady (ETH 1h)
-  STRATEGY_PRESET=growth python3 bot.py        # SOL 30m, ~3% monthly
-  STRATEGY_PRESET=high_return python3 bot.py   # SOL 30m higher risk, ~4% monthly
-  ./run_portfolio.sh                   # paper, ETH+BTC+SOL portfolio
-  MODE=live python3 bot.py             # real orders
+  python3 bot.py                                   # paper, default preset
+  STRATEGY_PRESET=adaptive_bidir_4h SYMBOL=BTC/USDT python3 bot.py
+  docker compose -f docker-compose.bidir4h-live.yml up -d   # the real thing
 """
 from __future__ import annotations
 
@@ -141,9 +121,8 @@ PRESETS = {
 
     # Generic bidir preset (symbol-agnostic) — identical machinery to
     # adaptive_inj_bidir but meant to be pointed at any pair via SYMBOL=.
-    # Used by the multi-pair portfolio launcher (run_bidir_portfolio.sh /
-    # docker-compose.bidir-portfolio.yml). Validated profitable on 7 pairs
-    # (INJ/SOL/ADA/ETH/LINK Sharpe>1.1; BTC 0.77; LTC 0.30).
+    # Was the 1h portfolio preset (launchers removed in the 2026-07-08
+    # cleanup; artifact-era numbers void). Kept for ad-hoc single runs.
     "adaptive_bidir":           ("triple_bidir", "INJ/USDT", "1h", 0.020, 5.0, False, False, True),
 
     # 4h port of adaptive_bidir — the HONEST-REBUILD validated config

@@ -177,16 +177,17 @@ Execution readiness (done before L1): maker entries (ENTRY_LIMIT_ORDERS,
 post-only at signal close, one-bar rest, partials closed not adopted,
 fill-bar TP suppressed — test_maker_entries.py, 9 cases) + TP limit orders
 (TP_LIMIT_ORDERS) + CONF sizing, all wired in the live compose. Splits:
-BTC legs $300 (0.001-lot ≈ $64 granularity), other legs $121.
+BTC legs $300.02 (0.001-lot ≈ $64 granularity), other legs $112.68.
 
 - [ ] **L0 — Account isolation (one-time, before L1)**: the -t and -p legs
       trade the SAME symbols; on one account they would net against each
       other and trip every reconcile guard (Pattern A). Create a Bybit
-      SUB-ACCOUNT for the pullback book, transfer $1,147 ($300 + 7×$121),
-      cut an IP-whitelisted trade-only key, export PULL_API_KEY/
-      PULL_API_SECRET. tg-control reads both accounts (API_KEY2 = sub key)
-      and aggregates equity/positions in one panel.
-- [ ] **L1 — Live shakedown (≥2 weeks, full $2300 at UNIT weights)**:
+      SUB-ACCOUNT for the pullback book, transfer **$1,088.78**
+      ($300.02 + 7×$112.68; the real deposit is $2,177.56 total), cut an
+      IP-whitelisted trade-only key, export PULL_API_KEY/PULL_API_SECRET.
+      tg-control reads both accounts (API_KEY2 = sub key) and aggregates
+      equity/positions in one panel. Full runbook: deploy/LIVE.md.
+- [ ] **L1 — Live shakedown (≥2 weeks, full $2,177.56 at UNIT weights)**:
       week-1 checklist — post-only entries accepted (postonly-reject rate
       logged), first maker entry fill, first TP-limit fill, Partial/Limit
       attach accepted on all 8 symbols, reduce-only closes, sl-external
