@@ -229,6 +229,48 @@ BTC legs $300.02 (0.001-lot ≈ $64 granularity), other legs $112.68.
   NOTHING joins the live book without the full gate battery + its own paper
   period.
 
+## Moonshot program (the fun budget — firewalled from the main book)
+
+Standing rules (user mandate 2026-07-08: "drop the hesitations… of course we
+do our precautions"):
+1. **FIREWALL**: moonshot experiments never touch the main accounts or the
+   main book's capital. If anything ever goes live it gets its own
+   sub-account, capped at ≤10% of the book — and only after the FULL gate
+   battery. Same law as everything else.
+2. **Heartbeat bar** (pre-registered): survive a 22bp taker round trip with
+   t ≥ 2 and year-stability. A heartbeat is a hunting license (a full
+   engine-level pre-registered study follows), never an edge.
+3. Multiple-testing honesty: ~15 tests per battery ⇒ expect ~1 false
+   positive at t ≥ 2; survivors must reconfirm on NEW data.
+4. Expect ~90% deaths. That is the deal.
+
+**Tier-1 battery (bar data) — RUN 2026-07-08: 0/6 alive**
+(moonshot_heartbeats.py): 15m crash-fade (gross ≈ −4bp — panic bars KEEP
+falling), funding-settlement fade (gross ≈ 0 — priced in), 1h vol-squeeze
+breakout (closest: net +22.7bp @24h, 100% yrs+, beat the random null, but
+t=1.11 → dead by pre-registration; eligible for ONE re-test as new data
+accrues), BTC→alts lead-lag 15m/1h (gross +3–8bp REAL but 3–7× below the
+cost floor — the textbook "signal exists, cost moat decides who eats it"),
+1d cross-sectional reversal (gross ≈ +4bp). The lesson tier-1 bought: on
+public bars at retail costs, there is no fast free lunch — as expected.
+
+**Tier-2 (needs tick data — collector.py feeds these; start after ≥60 days
+of collection)**: real liquidation-cascade fades (raw liq prints: cluster
+size/side/terminal-print timing), funding-settlement microstructure
+(seconds around the 8h clock), order-book-imbalance scalps, passive
+market-making feasibility read (spread capture vs adverse selection at our
+fee tier). Collector: docker-compose.collector.yml — public websockets
+only, ~5–10 MB/day gzipped, run it on the EC2 box alongside the live stack
+(START IT EARLY; tick history cannot be backfilled).
+
+**Tier-3 (needs external feeds)**: token-unlock calendar fades, listing
+events, news momentum.
+
+**The honest path to the "5%/month median" dream**: median ≈ 5%/mo at a
+survivable dial needs a book Sharpe ~2.5–3. Route: stack ORTHOGONAL sleeves
+(third leg, tier-2 event machines, sleeves earning back in) on the trend
+book until the dial reaches it — not a single magic aggressive strategy.
+
 ## Scoreboard (fixed engine, full costs, SOFT5 unless noted)
 
 | date | config | CAGR | Sh(mo) | MDD | gates | status |

@@ -1,0 +1,38 @@
+# Tick collector — public Bybit websocket streams to disk. READ-ONLY: no
+# keys, no account interaction; safe to run alongside the live stack (own
+# project name, own image tag, own volume).
+#
+# Purpose: fuel for the moonshot program's tier-2 studies (real liquidation
+# cascades, funding-settlement microstructure, book imbalance) — see
+# research/ROADMAP.md "Moonshot program". Start it early: every day it runs
+# is a day of tick history the OHLC bars can never give back.
+#
+#   docker compose -f docker-compose.collector.yml up -d --build
+#   docker compose -f docker-compose.collector.yml logs -f
+#
+# Disk: ~5-10 MB/day gzipped for 8 symbols (trades are 1s-aggregated;
+# liquidations raw). Data lands in the tick_data volume under
+# /app/data/YYYY-MM-DD/.
+
+name: rofl-collector
+
+services:
+  collector:
+    build: .
+    image: rofl-bot:collector
+    container_name: rofl-collector
+    restart: unless-stopped
+    command: ["python3", "collector.py"]
+    environment:
+      DATA_DIR: /app/data
+      # SYMBOLS: override to trim/extend; defaults to the 8 majors
+    volumes:
+      - tick_data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  tick_data:

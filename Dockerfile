@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy code
 COPY core/ ./core/
 COPY research/ ./research/
-COPY bot.py test_parity.py tg_control.py sleeves_paper.py ./
+COPY bot.py test_parity.py tg_control.py sleeves_paper.py collector.py ./
 
 # Cache and state directories — mounted as volumes in compose
 RUN mkdir -p /app/.cache /app/state /app/logs
