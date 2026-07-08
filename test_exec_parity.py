@@ -36,7 +36,7 @@ os.environ.setdefault("MODE", "paper")  # BotConfig reads env at import
 import bot as botmod  # noqa: E402
 from core.backtest import BTConfig, run_backtest  # noqa: E402
 from core.data import fetch_ohlcv  # noqa: E402
-from core.strategies import triple_confirm_bidir  # noqa: E402
+from core.strategies import pullback_in_trend, triple_confirm_bidir  # noqa: E402
 
 BASE = dict(ema_fast=9, ema_slow=26, ema_trend=50, rsi_min=55.0, adx_min=22.0,
             atr_n=14, sl_mult=1.8, tp_mult=3.0)
@@ -52,11 +52,11 @@ def _const(px):
     return lambda: float(px)
 
 
-def _make_bot(symbol: str, cooldown: int = 0):
+def _make_bot(symbol: str, cooldown: int = 0, preset: str = "adaptive_bidir"):
     tmp = tempfile.mkdtemp(prefix="rofl_exec_")
     cfg = botmod.BotConfig()
     cfg.mode = "paper"
-    cfg.preset = "adaptive_bidir"          # triple_bidir, allow_short=True
+    cfg.preset = preset                    # triple_bidir, allow_short=True
     cfg.symbol_override = symbol
     cfg.state_file = os.path.join(tmp, "state.json")
     cfg.log_file = os.path.join(tmp, "bot.log")
@@ -73,11 +73,12 @@ def _make_bot(symbol: str, cooldown: int = 0):
     return bot
 
 
-def replay_live(df: pd.DataFrame, sig: pd.DataFrame, symbol: str, cooldown: int = 0):
+def replay_live(df: pd.DataFrame, sig: pd.DataFrame, symbol: str, cooldown: int = 0,
+                preset: str = "adaptive_bidir"):
     """Drive the real bot exec methods bar-by-bar. Returns (trades, final_eq,
     skipped_entry_bars). bar_ts is threaded through so the live post-SL cooldown
     (keyed on bar timestamp) exercises the same way it does in tick()."""
-    bot = _make_bot(symbol, cooldown=cooldown)
+    bot = _make_bot(symbol, cooldown=cooldown, preset=preset)
     trades, skips, cur = [], [], {}
     for i in range(1, len(df)):
         bar = df.iloc[i]
@@ -116,6 +117,17 @@ def replay_live(df: pd.DataFrame, sig: pd.DataFrame, symbol: str, cooldown: int 
                                    bar_ts=int(df.index[i - 1].timestamp()))
                 if bot.state.position is not None:
                     cur["entry_bar"] = i
+                    # Exchange-attached SL/TP are live DURING the fill bar —
+                    # mirror the engine's entry-bar exit check (no grace bar).
+                    reason = bot.check_exit(bar)
+                    if reason is not None:
+                        pos = bot.state.position
+                        bot.ex.fetch_price = _const(bar["close"])
+                        bot.close_position(float(bar["close"]), reason,
+                                           bar_ts=bar_ts)
+                        trades.append(dict(entry_bar=i, exit_bar=i,
+                                           side=pos.side, reason=reason))
+                        cur.clear()
                 else:
                     skips.append(i)               # geometry / min-notional reject
     return trades, bot.state.equity, skips
@@ -162,11 +174,21 @@ def _diff_regions(a, b):
     return regions
 
 
-def run_case(pair: str, days: int = 180, cooldown: int = 0) -> int:
-    df = fetch_ohlcv(pair, "1h", days=days)
-    sig = triple_confirm_bidir(df, **BASE)
+def run_case(pair: str, days: int = 180, cooldown: int = 0,
+             tf: str = "1h", tp_mult: float | None = None,
+             strategy: str = "triple") -> int:
+    df = fetch_ohlcv(pair, tf, days=days)
+    if strategy == "pullback":
+        sig = pullback_in_trend(
+            df, tp_mult=6.0 if tp_mult is None else tp_mult)
+        preset = "pullback_bidir_4h"
+    else:
+        params = dict(BASE) if tp_mult is None else {**BASE, "tp_mult": tp_mult}
+        sig = triple_confirm_bidir(df, **params)
+        preset = "adaptive_bidir_4h" if tf == "4h" else "adaptive_bidir"
     bt, bt_eq = backtest_run(df, sig, cooldown=cooldown)
-    live, live_eq, skips = replay_live(df, sig, pair.replace("-", "/"), cooldown=cooldown)
+    live, live_eq, skips = replay_live(df, sig, pair.replace("-", "/"),
+                                       cooldown=cooldown, preset=preset)
     n = len(df)
     bt_tl, live_tl = _entry_timeline(bt, n), _entry_timeline(live, n)
     regions = _diff_regions(bt_tl, live_tl)
@@ -199,7 +221,7 @@ def run_case(pair: str, days: int = 180, cooldown: int = 0) -> int:
 
     drift = (live_eq / bt_eq - 1) * 100
     cd = f", cooldown {by_cooldown}" if cooldown > 0 else ""
-    print(f"{pair} ({days}d, {n} bars, K={cooldown}): bt {len(bt)} / live {len(live)} trades")
+    print(f"{pair} ({days}d {tf}, {n} bars, K={cooldown}): bt {len(bt)} / live {len(live)} trades")
     print(f"  divergence regions: {len(regions)}  "
           f"[flip-cascade {by_flip}, entry-skip {by_skip}{cd}, UNEXPECTED {unexpected}]")
     print(f"  final equity  bt {bt_eq:.2f}  live {live_eq:.2f}  (live drift {drift:+.1f}%)")
@@ -215,6 +237,13 @@ def main():
     base_unexpected = sum(run_case(p, d, cooldown=0) for p, d in pairs)
     print("\n--- cooldown parity (K=3): live cooldown gate vs backtest cooldown ---")
     cd_unexpected = sum(run_case(p, d, cooldown=3) for p, d in pairs)
+    print("\n--- 4h parity (K=0, tp_mult=6.0): the honest-rebuild paper config ---")
+    h4_unexpected = sum(run_case(p, 540, cooldown=0, tf="4h", tp_mult=6.0)
+                        for p, _ in pairs)
+    print("\n--- pullback parity (4h, K=3): the BLEND50_CONF second leg ---")
+    pb_unexpected = sum(run_case(p, 540, cooldown=3, tf="4h",
+                                 strategy="pullback")
+                        for p in ("BTC-USDT", "ETH-USDT", "SOL-USDT"))
     print("=" * 64)
     assert base_unexpected == 0, (
         f"{base_unexpected} UNEXPECTED exec-divergence region(s) at K=0: the live "
@@ -223,8 +252,16 @@ def main():
     assert cd_unexpected == 0, (
         f"{cd_unexpected} UNEXPECTED divergence region(s) at K=3: the live re-entry "
         f"cooldown does not match the backtest cooldown. Investigate before deploying.")
-    print("EXEC PARITY OK - K=0 exec matches and the K=3 re-entry cooldown gate "
-          "matches the backtest; no unexpected execution drift.")
+    assert h4_unexpected == 0, (
+        f"{h4_unexpected} UNEXPECTED divergence region(s) on the 4h/tp6 config: the "
+        f"live executor diverges from the fixed engine on the paper-program setup.")
+    assert pb_unexpected == 0, (
+        f"{pb_unexpected} UNEXPECTED divergence region(s) on the pullback 4h config: "
+        f"the live executor diverges from the fixed engine on the promoted "
+        f"BLEND50_CONF second leg. Investigate before papering.")
+    print("EXEC PARITY OK - K=0 exec matches, the K=3 cooldown gate matches, the "
+          "4h/tp6 paper config matches, and the pullback 4h leg matches the fixed "
+          "engine; no unexpected drift.")
 
 
 if __name__ == "__main__":

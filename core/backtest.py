@@ -44,6 +44,13 @@ class BTConfig:
     # fill AT the open, so a same-bar reversal is time-consistent. Default is
     # the FIXED behavior; set True only to reproduce pre-2026-07-05 numbers.
     legacy_same_bar_reentry: bool = False
+    # Check SL/TP on the ENTRY bar itself. The engine historically gave a new
+    # position a one-bar grace period (its stop was first testable on the NEXT
+    # bar) — but a taker entry fills at the open, so the entire bar's range is
+    # post-entry, and live exchange-attached stops protect immediately.
+    # SL-first when both hit (conservative, matches the intra-bar convention).
+    # Default ON (honest); False only to reproduce pre-2026-07-05 numbers.
+    entry_bar_exit_check: bool = True
 
 
 @dataclass
@@ -225,6 +232,34 @@ def run_backtest(price_df: pd.DataFrame, sig_df: pd.DataFrame,
                     pos_open_time = ts
                     pos_bars = 0
                     pos_notional = notional
+                    # Entry-bar SL/TP check: the fill is at the open, so this
+                    # bar's whole range is post-entry (SL-first if both hit).
+                    if cfg.entry_bar_exit_check:
+                        e_sl = (l <= pos_sl) if pos_side == 1 else (h >= pos_sl)
+                        e_tp = (h >= pos_tp) if pos_side == 1 else (l <= pos_tp)
+                        if e_sl or e_tp:
+                            x_px = pos_sl if e_sl else pos_tp
+                            reason0 = "sl" if e_sl else "tp"
+                            x_fill = _apply_slippage(x_px, pos_side, cfg.slip_bps,
+                                                     is_entry=False)
+                            gross0 = (x_fill - pos_entry) * pos_qty * pos_side
+                            fee0 = x_fill * pos_qty * cfg.fee_rate
+                            pnl0 = gross0 - fee0
+                            equity += pnl0
+                            trades.append(Trade(
+                                side=pos_side, entry_time=ts, exit_time=ts,
+                                entry_px=pos_entry, exit_px=x_fill, qty=pos_qty,
+                                notional=pos_notional, sl=pos_sl, tp=pos_tp,
+                                pnl=pnl0, fees=fee0, reason=reason0, bars_held=0))
+                            cd0 = cfg.cooldown_bars if reason0 == "sl" else \
+                                cfg.cooldown_bars_tp if reason0 == "tp" else 0
+                            if cd0 > 0:
+                                if pos_side == 1:
+                                    block_long_until = max(block_long_until, i + cd0)
+                                else:
+                                    block_short_until = max(block_short_until, i + cd0)
+                            pos_side = 0
+                            pos_qty = 0.0
 
         # 3) Mark equity (use close price for unrealized PnL)
         if pos_side != 0:

@@ -15,8 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy code
 COPY core/ ./core/
 COPY research/ ./research/
-COPY bot.py bot_status.py risk_analyzer.py test_parity.py tg_control.py ./
-COPY run_portfolio.sh run_bidir_portfolio.sh portfolio.sh ./
+COPY bot.py test_parity.py tg_control.py sleeves_paper.py ./
 
 # Cache and state directories — mounted as volumes in compose
 RUN mkdir -p /app/.cache /app/state /app/logs
@@ -26,5 +25,5 @@ ENV STATE_FILE=/app/state/bot_state.json \
     LOG_FILE=/app/logs/bot.log \
     PYTHONUNBUFFERED=1
 
-# Default: single-bot paper mode. Override via env / compose.
+# Default command; the composes set MODE/preset/symbol per service.
 CMD ["python3", "bot.py"]

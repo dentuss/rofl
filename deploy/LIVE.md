@@ -1,225 +1,223 @@
-# Going live on Bybit — step-by-step
+# Going live — the 4h BLEND50_CONF book (runbook, 2026-07-08)
 
-> **⚠ READ FIRST (2026-07-05):** the backtest numbers that justified going
-> live were inflated by a same-bar re-entry engine artifact. With realistic
-> fills the production SOFT5 stack measures **~0% CAGR (Sharpe(mo) 0.22,
-> MDD −20%) on 2.88y of Bybit data — no demonstrated edge**. See
-> `research/FINDINGS.md` correction section. Do not scale up on the numbers
-> below; they are kept for historical context only.
+This is the complete deployment guide for the **live-first program**
+(research/ROADMAP.md, Phase 6). Follow it top to bottom; every section gates
+the next. The deposit this runbook is sized for: **$2,177.56 USDT total**.
 
-This is the runbook for switching from paper to real money on a Bybit USDT
-perpetual account. Follow it in order. **Do not skip the preflight checks**
-— they're there because in paper mode every mistake is free; in live mode
-some are not.
+**What you are deploying** — the promoted trend book, every layer gate-passed
+on the fixed engine with full costs (see `research/FINDINGS.md`):
 
-## 0. Decide which portfolio
+- **MAJORS8** (BTC ETH SOL XRP DOGE ADA LINK AVAX) × **two entry legs** at
+  50/50 capital: `-t` = triple_bidir (EMA stack + RSI + ADX, tp 6×ATR),
+  `-p` = pullback-in-trend (EMA50 side + RSI 40/60 recross, tp 6×ATR)
+- Overlays: walk-forward GMM regime mask, F&G 3-day persistence, drawdown
+  decay tiers, CHOP half-sizing, vol targeting (60% ann), GMM-confidence
+  sizing
+- Execution: **post-only maker entries** (`ENTRY_LIMIT_ORDERS`) and
+  **TP as a resting limit** (`TP_LIMIT_ORDERS`) — the exact cost model the
+  backtests price
+- 16 bot containers + 1 Telegram control panel, one compose file
 
-**Production allocation (2026-07-02): 5-pair SOFT5 — INJ 25 / SOL 18.75 /
-ADA 18.75 / ETH 18.75 / LINK 18.75.** The Bybit-perp robustness study
-(`research/portfolio_robustness.py` + `portfolio_softened.py`) found:
+**Honest expectations at unit weights** (what L1/L2 runs; fixed engine, real
+funding, 2023-08 → 2026-07, start $2,177.56 — `research/deploy_report.py`):
 
-- the **8-pair's edge is overfit** — in-sample Sharpe 4.60 decays to 2.70
-  out-of-sample, with the worst tails of any book (worst month −9.6%). It is
-  **on hold**; do not deploy it on the strength of the older KuCoin numbers.
-- the original `inj_heavy` (INJ 40) leans on a single-name concentration the
-  backtest rewards but can't risk-price forward;
-- **SOFT5** keeps the 5-name selection (97th pct vs the random-5 null OOS),
-  posts the best monthly Sharpe (3.81) and consistency (91% positive months),
-  and caps the INJ concentration.
+| | final$ | CAGR | Sh(mo) | dMDD | worst day | worst month | win% | IS → OOS |
+|---|---|---|---|---|---|---|---|---|
+| **UNIT WEIGHTS (live now)** | 2,901 | **10.4%** | **1.50** | **−4.5%** | −1.5% | −1.7% | 57 | 1.47 → 1.51 |
+| @15% vol (x2.1) — L3 later | 3,883 | 22.2% | 1.49 | −9.2% | −3.1% | −3.5% | 57 | 1.46 → 1.50 |
+| @25% vol (x3.5) — L3 later | 5,510 | 37.9% | 1.48 | −15.1% | −5.2% | −5.8% | 57 | 1.44 → 1.49 |
 
-| Deposit | Recommended | Why |
-|---|---|---|
-| $100 – $400 | 5-pair (SOFT5 weights) | Per-bot slices stay above exchange minimums. |
-| **$400+** | **5-pair SOFT5** | Best OOS-robust risk-adjusted book; INJ de-concentrated. |
-| — | 8-pair | On hold: OOS-overfit (see above). Revisit only with fresh OOS evidence. |
+Anchor on the **full-history Sharpe ~1.2** (the 2022-inclusive gate), not the
+table's 1.5: expect the live experience to be *worse* than the common-window
+numbers, and treat matching them as upside. Typical L1 month: **±1–3%**
+(±$25–70). The pullback legs trade ~once per 6 weeks per name — weeks of
+idle `-p` containers are CORRECT, not broken.
 
-## 1. Bybit account setup (one-time)
+---
 
-1. **Sign up** at bybit.com; complete KYC level 1.
-2. **Deposit USDT** to your **Unified Trading Account** (UMA, NOT Funding).
-3. **Enable USDT perpetuals** (default on Unified accounts).
-4. **Set margin mode to Cross** on the perpetual section (Position Mode
-   should be **One-Way Mode**, not Hedge — the bot does not run in hedge mode).
-5. **Create API key** at <https://www.bybit.com/app/user/api-management>:
-   - **Permissions:** *Contract → Trade* + *Position* (Orders + Positions).
-   - **NO withdrawal**, **NO transfer**, **NO sub-account**.
-   - **IP whitelist your EC2 public IP** — this is the single most important
-     security control. Without it a key leak = drained account; with it the
-     key is useless off your server.
-   - Save the **API key and secret** somewhere safe. You can't view the
-     secret again later.
-6. **Funding-rate awareness:** Bybit charges/credits funding every 8h. The
-   backtest already models a fair central estimate (≈1bp/8h). For a long/short
-   balanced book this nets to ≈0. Don't panic when you see funding line items
-   on your account history.
+## 1. Box prep (one-time) — `deploy/setup.sh`
 
-## 2. Sync the box and prep `.env`
+On a fresh EC2 instance (t4g.medium or larger — 17 containers; t4g.small
+will OOM), as `ec2-user`/`ubuntu` (not root):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dentuss/rofl/main/deploy/setup.sh | bash
+# or, with the repo already cloned:
+bash deploy/setup.sh
+```
+
+It installs Docker + Compose v2, clones/pulls the repo to `~/rofl`, and
+**pre-builds the image without starting anything**. Log out and back in (or
+`exec sg docker`) so the docker group takes effect.
+
+Sanity: the box clock must be NTP-synced — Bybit auth breaks on skew
+(`timedatectl` → "System clock synchronized: yes").
+
+## 2. Bybit accounts — TWO of them (this is not optional)
+
+The `-t` and `-p` legs trade the **same symbols**. Two bots on one account
+would net against each other (a pullback short literally reduces the triple
+long) and trip every reconcile guard. The pullback book therefore lives on a
+**sub-account**.
+
+**Main account (triple book, $1,088.78):**
+1. Unified Trading Account, USDT in UTA (not Funding), **Cross margin**,
+   **One-Way** position mode (never Hedge).
+2. API key: permissions *Contract → Orders + Positions* ONLY — **no
+   withdrawal, no transfer**. **IP-whitelist the EC2 public IP** (the single
+   most important security control).
+
+**Sub-account (pullback book, $1,088.78):**
+1. Bybit → Account → Subaccount Management → create a **Standard**
+   sub-account with UTA.
+2. Transfer **$1,088.78 USDT** main → sub ($300.02 for BTC-p + 7 × $112.68).
+3. Same margin/position-mode settings as main (Cross, One-Way).
+4. Cut the sub-account its **own API key**: same trade-only permissions,
+   same IP whitelist.
+
+Leave **$1,088.78** on the main account for the triple book. After the
+transfer, main and sub each hold half the book.
+
+## 3. `.env` — the only place secrets live
 
 ```bash
 cd ~/rofl
-git pull origin main
-sudo ./portfolio.sh archive   # snapshot the paper run for the record FIRST
-```
-
-Then create the live `.env` (do NOT keep the paper one):
-
-```bash
-# WIPE the paper state — paper-mode equity/peak/positions must NOT carry into live.
-sudo ./portfolio.sh down -v   # (run with PORTFOLIO=8 too if you tried that)
-
-# Write the live env file. Set TOTAL_EQUITY to YOUR actual Bybit balance.
 cat > .env <<'EOF'
-MODE=live
-EXCHANGE=bybit
-PORTFOLIO=5
-TOTAL_EQUITY=2300
+# --- main account = triple (-t) legs -------------------------------------
+API_KEY=your_MAIN_key
+API_SECRET=your_MAIN_secret
 
-# SOFT5 production weights (INJ capped at 25%; without these lines the wrapper
-# defaults to the old inj_heavy 40/20/15/15/10 split)
-INJ_WEIGHT=0.25
-SOL_WEIGHT=0.1875
-ADA_WEIGHT=0.1875
-ETH_WEIGHT=0.1875
-LINK_WEIGHT=0.1875
+# --- sub-account = pullback (-p) legs ------------------------------------
+# Empty values are SAFE: the -p legs fail auth loudly and trade nothing.
+PULL_API_KEY=your_SUB_key
+PULL_API_SECRET=your_SUB_secret
 
-API_KEY=your_bybit_key_here
-API_SECRET=your_bybit_secret_here
-# API_PASSPHRASE is NOT used by Bybit — leave unset
-
-# Telegram (optional but strongly recommended for live)
+# --- Telegram (strongly recommended: fills, errors, the control panel) ---
 TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_CHAT_ID=your_personal_chat_id
-EOF
+TELEGRAM_CHAT_ID=your_chat_id
 
-chmod 600 .env   # readable only by you
+# --- sizing (defaults already match the $2,177.56 deposit) ---------------
+# BTC4H_LIVE_EQUITY=300.02
+# LEG4H_LIVE_EQUITY=112.68
+EOF
+chmod 600 .env
 ```
 
-> **Two values you MUST get right or the bot won't start in live mode:**
-> 1. `API_KEY` and `API_SECRET` are correct and the key has Trade permission.
-> 2. `TOTAL_EQUITY` matches what you actually have on Bybit (the bot doesn't
->    auto-sync — it sizes positions off this number).
+Compose reads `.env` automatically from the repo directory. The per-leg
+splits are compose defaults — you only uncomment the two sizing lines to
+override them (L3 dial-ups later happen here).
 
-## 3. Pre-flight checks (do NOT skip)
+## 4. Preflight (do not skip)
 
 ```bash
-# 1. Test the API key talks to Bybit at all
-python3 -c "
-import ccxt, os
+# Keys talk to Bybit and see the right balances (~1088.78 each):
+python3 - <<'PY'
+import ccxt
 from dotenv import dotenv_values
 env = dotenv_values('.env')
-ex = ccxt.bybit({'apiKey': env['API_KEY'], 'secret': env['API_SECRET'],
-                  'options': {'defaultType': 'linear'}})
-bal = ex.fetch_balance()
-print('USDT total :', bal.get('USDT', {}).get('total'))
-print('USDT free  :', bal.get('USDT', {}).get('free'))
-"
+for tag, k, s in (("MAIN", env.get('API_KEY'), env.get('API_SECRET')),
+                  ("SUB ", env.get('PULL_API_KEY'), env.get('PULL_API_SECRET'))):
+    ex = ccxt.bybit({'apiKey': k, 'secret': s, 'options': {'defaultType': 'linear'}})
+    bal = ex.fetch_balance()
+    print(tag, "USDT total:", bal.get('USDT', {}).get('total'))
+PY
 ```
 
-Expected: a number close to your deposit. If you get `AuthenticationError`
-or `Permission denied`, the key/secret are wrong or the IP isn't
-whitelisted. **Fix this before going further.**
+Expected: MAIN ≈ 1088.78, SUB ≈ 1088.78. `AuthenticationError` = wrong
+key/secret or missing IP whitelist — fix before continuing.
 
 ```bash
-# 2. (Optional) Test Telegram: open Telegram, send /start to your bot, then:
-curl -s "https://api.telegram.org/bot${TG_TOKEN}/getUpdates" | jq '.result[-1].message.chat.id'
-# Confirm the number matches TELEGRAM_CHAT_ID in .env.
+# Telegram wired? (send /start to your bot first)
+curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | grep -o '"id":[0-9]*' | head -1
 ```
 
-## 4. Start live
+## 5. Start — L1 live shakedown
 
 ```bash
-sudo -E ./portfolio.sh up -d --build
+cd ~/rofl
+docker compose -f docker-compose.bidir4h-live.yml up -d --build
+docker compose -f docker-compose.bidir4h-live.yml ps      # 17 services healthy
+docker compose -f docker-compose.bidir4h-live.yml logs -f --tail=20
 ```
 
-The wrapper prints the computed split BEFORE starting — **check it**. For
-SOFT5 at $2300 it must read `INJ 575.0  SOL 431.25  ADA 431.25  ETH 431.25
-LINK 431.25`. If it shows the 40/20/15/15/10 amounts, your `*_WEIGHT` lines
-didn't load — stop and fix `.env`.
+Within a minute each bot logs its config line (`starting bot mode=live …`)
+and the Telegram panel (`rofl4hL-tg`) answers with the button menu — press
+**Stats**: 16 legs, booked equity ≈ 2,177.56, real equity per account shown.
 
-The bot will then run its **own preflight**:
-- `LIVE balance check OK: NNN.NN USDT on exchange` — keys work.
-- `STATE/SLICE MISMATCH` → **the bot refused to start** because paper
-  state survived into live. Run `sudo ./portfolio.sh down -v` then retry.
-  (To override, set `TRUST_STATE=1` in `.env` — but really, just wipe.)
+**Week-1 checklist (L1, from ROADMAP Phase 6)** — all of these observed:
 
-Within ~60s:
-```bash
-sudo ./portfolio.sh status
-```
-Expect all 5 bots `healthy`, equity equal to the splits (575/431.25×4 at
-$2300), all flat.
+- [ ] first `PENDING LONG/SHORT maker limit …` log line (post-only accepted)
+- [ ] first `OPEN … (maker fill)` — a maker entry actually filled
+- [ ] first TP-limit fill (position closed by the resting target order)
+- [ ] Partial/Limit TP attach accepted on all 8 symbols (no
+      `TP_LIMIT_ORDERS` rejections in logs)
+- [ ] a `-t` and `-p` position coexisting on the same symbol with zero
+      reconcile complaints (the two-account isolation working)
+- [ ] one deliberate restart (`docker compose … restart btc-t`) while an
+      order rests — the pending survives and resolves
+- [ ] `min-notional`/`skipping order` lines rare (only on the smallest
+      risk-scaled entries)
 
-## 5. What to expect — the first 24-72 hours
+Fallback flags (documented in the compose): if Bybit rejects an order type
+on some symbol, set `TP_LIMIT_ORDERS=0` and/or `ENTRY_LIMIT_ORDERS=0` in
+`.env`… then `up -d` again and note the economics delta (taker entries cost
+~4bp+slip more; expectations shift down 1–3pp CAGR).
 
-| Time window | Normal | Worth investigating |
-|---|---|---|
-| 0–4 hours | All bots quiet, regime-change logs trickling | Any `ERROR`, `CRITICAL`, or `ORPHAN POSITION` lines |
-| First trade | One of the bots opens a position. Telegram: `OPEN LONG/SHORT…` | `entry order FAILED` — check API key, balance, or pair min-cost |
-| First close | TP, SL, or time stop. Telegram: `CLOSE…` with PnL | Bot showing position but Bybit doesn't (or vice versa) → check `./portfolio.sh status` |
-| Day 1 totals | Total equity ±2% is fine | Sustained −5% with no clear trade explanation → review `events-*.jsonl` |
-| Week 1 | 5-15 closed trades, win rate 40–55%, PnL ±10% | Win rate <30% across all bots OR no trades after 5+ days → check the F&G filter isn't blocking everything |
-
-**The bidir backtest median is +5–7%/month with a monthly worst-month
-around −10–15%.** Daily moves can be ±5% on either side and still be
-normal. The strategy makes money over months, not days — don't intervene
-on a slow week.
-
-## 6. Day-to-day operations
+## 6. Operations
 
 ```bash
-sudo ./portfolio.sh status              # equity + positions across all bots
-sudo ./portfolio.sh logs -f --tail=50   # follow logs
-sudo ./portfolio.sh logs inj-bot --tail=200 | grep -E "OPEN|CLOSE|ERROR"
-sudo ./portfolio.sh archive             # snapshot every week or before stopping
+docker compose -f docker-compose.bidir4h-live.yml ps                     # health
+docker compose -f docker-compose.bidir4h-live.yml logs btc-t --tail=100  # one leg
+docker compose -f docker-compose.bidir4h-live.yml logs -f | grep -E "OPEN|CLOSE|PENDING|ERROR|CRITICAL|HALT"
 ```
 
-**Telegram is your remote eyes** — when you're away from the box you'll
-get trade-open / trade-close / regime-change / error pings. If Telegram
-goes silent for >12h while bots are healthy, something's wrong with the
-notifier (not necessarily the bot).
+Telegram buttons: **Stats** (equity/DD per leg + real-vs-booked), 
+**Positions** (live from both accounts, `·sub` = pullback book), **Today**,
+**Health** (heartbeats), **Reconcile** (booked vs real equity gap).
 
-## 7. Emergency procedures
+Weekly (L2 measurement): compare the trade log against engine expectations —
+entry fills vs signal closes, TP fill rate, funding paid. The measured
+slippage feeds back into the cost model; >0.2 Sharpe degradation halts the
+program (ROADMAP Phase 6).
 
-| Situation | Action |
+## 7. Kill criteria (pre-registered — act, don't deliberate)
+
+| Trigger | Action |
 |---|---|
-| **Markets going crazy, want everything OUT** | On Bybit UI: Trading → Close All Positions. Then on box: `sudo ./portfolio.sh down`. State is preserved; you can resume later. |
-| **A bot logs `ORPHAN POSITION`** | The bot already tried to force-close. Check Bybit UI; if a position remains, close it manually. The bot will stop trading that pair until you `restart` it. |
-| **Equity divergence (bot equity ≠ Bybit balance)** | `sudo ./portfolio.sh down`, manually reconcile (record true balance), then either `down -v` + restart fresh OR set `TRUST_STATE=1` and accept the drift will persist. |
-| **Bot won't start: `STATE/SLICE MISMATCH`** | Run `sudo ./portfolio.sh down -v` and start again — wipes state to match exchange balance. |
-| **EC2 instance becomes unreachable** | Stop/start via AWS console (state survives), then `sudo ./portfolio.sh status` to verify everything resumed. With `restart: unless-stopped` the bots auto-resume. |
+| Book equity −8% from deploy (≈ −$175) at unit weights | halt new entries (`down`), full review before restart |
+| A bot logs `HALTED` (side conflict / extra size / untracked position) | it already stopped touching the exchange; reconcile that symbol on Bybit manually, then restart the service |
+| `pending entry status unknown >2 bars` Telegram alert | check the order on Bybit; entries on that leg are blocked until it resolves |
+| PULL legs' trailing-3-month Sharpe < 0 | demote to BLEND75 or triple-only (pre-registered fallback; ask for the reweighted compose) |
+| Any UNEXPECTED exec divergence vs the engine | halt, diagnose, re-run `test_exec_parity.py` before resuming |
+| Emergency — want everything flat NOW | Bybit UI → Close All Positions on BOTH accounts, then `docker compose -f docker-compose.bidir4h-live.yml down` |
 
-## 8. Scaling up later
+Never touch the accounts manually while the stack runs (the bots own them);
+never run a second live portfolio next to this one.
 
-Once you're past 2-3 weeks of clean live runtime and the live PnL
-broadly tracks paper expectations, you can:
+## 8. L2 → L3: the dial
 
-1. **Deposit more.** Just bump `TOTAL_EQUITY` in `.env` AND deposit the
-   delta on Bybit. Then `down -v && up -d --build` (wiping state and
-   re-initializing at the new amount). Note: this resets PnL accounting —
-   archive first.
-2. **8-pair: ON HOLD** (2026-07-02). The Bybit-perp OOS study found its edge
-   overfit (IS Sharpe 4.60 → OOS 2.70, worst month −9.6%). Everything is wired
-   (`docker-compose.bidir8.yml`, cooldown, tg-control) if fresh OOS evidence
-   ever reverses the call, but do not switch on the old KuCoin numbers. If you
-   do run it: archive, `down -v`, set `PORTFOLIO=8` in `.env` and REMOVE the
-   5-pair `*_WEIGHT` lines (INJ/ADA weight overrides leak across portfolios —
-   the wrapper aborts if the weights don't sum to 1.0). Needs `t4g.medium`;
-   `t4g.small` will OOM with 8 bots.
+After **L1 (≥2 weeks) + L2 (2–4 weeks)** are green and measured costs match
+the model: the first dial is **15% vol** — multiply both equity lines in
+`.env` by ~2.1 (`BTC4H_LIVE_EQUITY=630`, `LEG4H_LIVE_EQUITY=237`) **only if
+the wallet actually holds that much**, or keep the deposit and accept that
+the dial is really a leverage decision (the bot sizes off STARTING_EQUITY).
+Honest L3 expectations: ~15–22%/y, dMDD ~−9%, worst day ~−3%. The 25% dial
+(x3.5, ~38%/y, −15% dMDD) is a separate decision after a full quarter of
+live record matching the model. Archive state before any resize
+(`down` + copy volumes), then `down -v && up -d` to re-initialize splits.
 
-## 9. The honest risks (read this once)
+## 9. The honest risks
 
-- **The backtest is in-sample**. Real out-of-sample returns will be
-  lower. Expect 50–80% of the backtest's monthly return at best.
-- **The 2022-style "everything crashes together" event** will hurt — the
-  decay ladder caps the damage but doesn't make it zero. A −25% portfolio
-  drawdown month is possible.
-- **Bybit can de-list pairs, change fees, or have outages.** The bot
-  handles short outages cleanly; multi-day exchange issues need manual
-  attention.
-- **The bot does not know about anything you do manually on Bybit.** If
-  you open a position by hand, the bot may try to close it as if it were
-  its own. Don't touch the account except via the bot once live.
-
-Good luck. If you see anything weird in the first week, save the logs
-and ping. The data from your first live run will be more useful than
-months of paper.
+- The trend book passed the 2022-inclusive long-history gate at **+0.18**
+  pre-2023 Sharpe — it survived the bear, it did not print in it. A repeat
+  of 2022 at unit weights looks like months of −1–2% grinding.
+- The pullback leg alone did NOT pass the pre-2023 gate (−2.57) — it is
+  carried by the blend and has a pre-registered demotion trigger. Watch it.
+- Maker entries mean MISSED trades are normal (the engine models the same
+  miss). A signal that runs away without filling is not a bug.
+- Bybit can reject the Partial/Limit TP attach, delist a pair, or have an
+  outage. Short outages self-heal (restart-resume is tested); multi-day
+  issues need hands.
+- The backtest's monthly numbers are common-window (2023-08+). The honest
+  full-history anchor is lower. Judge the program on L2's reconcile, not on
+  week-1 P&L.

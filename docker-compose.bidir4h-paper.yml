@@ -1,0 +1,277 @@
+# 4h PAPER portfolio — the PROMOTED BLEND50_CONF trend book, dry-run only.
+#
+# Phase-4/5 promotion (research/FINDINGS.md 2026-07-06): MAJORS8 x two entry
+# legs at 50/50 capital —
+#   triple leg    adaptive_bidir_4h  (triple_bidir tp6)
+#   pullback leg  pullback_bidir_4h  (EMA50 side + RSI 40/60 recross, tp6)
+# both under the full adopted overlay stack: walk-forward regime mask + F&G
+# 3-day persistence + decay tiers + CHOP half-size + vol targeting + GMM
+# confidence sizing (REGIME_CONF_SIZING) + SL cooldown.
+#
+# Honest backtest expectations for the whole book (2.9y Bybit, fixed engine,
+# maker entries, TP-as-limit, real funding; daily granularity):
+#   unit weights: Sh(mo) ~1.5, dMDD ~-4.8%, worst month ~-1.7%
+#   @25% vol (x3.6): CAGR ~37%, dMDD ~-13%, worst day ~-5%
+# The pullback leg trades RARELY (~1 trade/6wk/pair, in-market 4-8%) — long
+# idle stretches on the -p services are EXPECTED, not a bug.
+# The paper period compares live fills/decisions against these numbers before
+# any real-money discussion. MODE is pinned to paper — no key passthrough.
+#
+# $2,177.56 book / 16 services = $136.10 per service (equal split).
+#
+# Run:
+#   docker compose -f docker-compose.bidir4h-paper.yml up -d --build
+#   docker compose -f docker-compose.bidir4h-paper.yml logs -f
+#   docker compose -f docker-compose.bidir4h-paper.yml down
+#
+# Do NOT run alongside a live portfolio that shares container names — these
+# use rofl4h-* names and separate volumes. Check `docker ps` anyway.
+
+# Explicit project name + dedicated image tag — keeps this stack fully
+# isolated from the live one (project orphan-removal and image-tag reuse
+# both bite otherwise; see the live compose header).
+name: rofl4h-paper
+
+x-bot: &bot-defaults
+  build: .
+  image: rofl-bot:4h-paper
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD-SHELL", "[ $(($(date +%s) - $(stat -c %Y /app/state/heartbeat 2>/dev/null || echo 0))) -lt 300 ]"]
+    interval: 60s
+    timeout: 5s
+    retries: 3
+    start_period: 180s
+  environment: &env-defaults
+    MODE: paper                              # pinned — no keys in this file
+    EXCHANGE: ${EXCHANGE:-bybit}
+    POLL_SECONDS: ${POLL_SECONDS:-30}
+    TL_TP_MULT: "6.0"                        # validated exit (honest_rebuild_r2/r3)
+    # Engine K=3 adopted; the live gate compares the SIGNAL bar's ts (one bar
+    # stricter), so live 2 == engine 3.
+    COOLDOWN_BARS: "2"
+    CHOP_RISK_MULT: "0.5"                    # RSCD3 half-sizing (adopted)
+    VOL_TARGET_ANN: "0.60"                   # vol targeting (adopted, G4)
+    REGIME_CONF_SIZING: "1"                  # GMM-confidence sizing (adopted 2026-07-06)
+    TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+x-triple: &triple-env
+  <<: *env-defaults
+  STRATEGY_PRESET: adaptive_bidir_4h
+
+x-pull: &pull-env
+  <<: *env-defaults
+  STRATEGY_PRESET: pullback_bidir_4h
+
+services:
+  btc-t:
+    <<: *bot-defaults
+    container_name: rofl4h-btc-t
+    environment:
+      <<: *triple-env
+      SYMBOL: BTC/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
+    volumes: [btc_t_state:/app/state, btc_t_logs:/app/logs, shared4h_cache:/app/.cache]
+  btc-p:
+    <<: *bot-defaults
+    container_name: rofl4h-btc-p
+    environment:
+      <<: *pull-env
+      SYMBOL: BTC/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
+    volumes: [btc_p_state:/app/state, btc_p_logs:/app/logs, shared4h_cache:/app/.cache]
+
+  eth-t:
+    <<: *bot-defaults
+    container_name: rofl4h-eth-t
+    environment:
+      <<: *triple-env
+      SYMBOL: ETH/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
+    volumes: [eth_t_state:/app/state, eth_t_logs:/app/logs, shared4h_cache:/app/.cache]
+  eth-p:
+    <<: *bot-defaults
+    container_name: rofl4h-eth-p
+    environment:
+      <<: *pull-env
+      SYMBOL: ETH/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
+    volumes: [eth_p_state:/app/state, eth_p_logs:/app/logs, shared4h_cache:/app/.cache]
+
+  sol-t:
+    <<: *bot-defaults
+    container_name: rofl4h-sol-t
+    environment:
+      <<: *triple-env
+      SYMBOL: SOL/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
+    volumes: [sol_t_state:/app/state, sol_t_logs:/app/logs, shared4h_cache:/app/.cache]
+  sol-p:
+    <<: *bot-defaults
+    container_name: rofl4h-sol-p
+    environment:
+      <<: *pull-env
+      SYMBOL: SOL/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
+    volumes: [sol_p_state:/app/state, sol_p_logs:/app/logs, shared4h_cache:/app/.cache]
+
+  xrp-t:
+    <<: *bot-defaults
+    container_name: rofl4h-xrp-t
+    environment:
+      <<: *triple-env
+      SYMBOL: XRP/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
+    volumes: [xrp_t_state:/app/state, xrp_t_logs:/app/logs, shared4h_cache:/app/.cache]
+  xrp-p:
+    <<: *bot-defaults
+    container_name: rofl4h-xrp-p
+    environment:
+      <<: *pull-env
+      SYMBOL: XRP/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
+    volumes: [xrp_p_state:/app/state, xrp_p_logs:/app/logs, shared4h_cache:/app/.cache]
+
+  doge-t:
+    <<: *bot-defaults
+    container_name: rofl4h-doge-t
+    environment:
+      <<: *triple-env
+      SYMBOL: DOGE/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
+    volumes: [doge_t_state:/app/state, doge_t_logs:/app/logs, shared4h_cache:/app/.cache]
+  doge-p:
+    <<: *bot-defaults
+    container_name: rofl4h-doge-p
+    environment:
+      <<: *pull-env
+      SYMBOL: DOGE/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
+    volumes: [doge_p_state:/app/state, doge_p_logs:/app/logs, shared4h_cache:/app/.cache]
+
+  ada-t:
+    <<: *bot-defaults
+    container_name: rofl4h-ada-t
+    environment:
+      <<: *triple-env
+      SYMBOL: ADA/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
+    volumes: [ada_t_state:/app/state, ada_t_logs:/app/logs, shared4h_cache:/app/.cache]
+  ada-p:
+    <<: *bot-defaults
+    container_name: rofl4h-ada-p
+    environment:
+      <<: *pull-env
+      SYMBOL: ADA/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
+    volumes: [ada_p_state:/app/state, ada_p_logs:/app/logs, shared4h_cache:/app/.cache]
+
+  link-t:
+    <<: *bot-defaults
+    container_name: rofl4h-link-t
+    environment:
+      <<: *triple-env
+      SYMBOL: LINK/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
+    volumes: [link_t_state:/app/state, link_t_logs:/app/logs, shared4h_cache:/app/.cache]
+  link-p:
+    <<: *bot-defaults
+    container_name: rofl4h-link-p
+    environment:
+      <<: *pull-env
+      SYMBOL: LINK/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
+    volumes: [link_p_state:/app/state, link_p_logs:/app/logs, shared4h_cache:/app/.cache]
+
+  avax-t:
+    <<: *bot-defaults
+    container_name: rofl4h-avax-t
+    environment:
+      <<: *triple-env
+      SYMBOL: AVAX/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
+    volumes: [avax_t_state:/app/state, avax_t_logs:/app/logs, shared4h_cache:/app/.cache]
+  avax-p:
+    <<: *bot-defaults
+    container_name: rofl4h-avax-p
+    environment:
+      <<: *pull-env
+      SYMBOL: AVAX/USDT
+      STARTING_EQUITY: ${LEG4H_EQUITY:-136.10}
+    volumes: [avax_p_state:/app/state, avax_p_logs:/app/logs, shared4h_cache:/app/.cache]
+
+  # Telegram button panel (Stats / Positions / Today / Health). No keys in
+  # this file, so it runs booked-only — exactly what paper needs.
+  tg-control:
+    build: .
+    image: rofl-bot:4h-paper
+    container_name: rofl4h-tg
+    restart: unless-stopped
+    command: ["python3", "tg_control.py"]
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      STATES_DIR: /states
+    volumes:
+      - btc_t_state:/states/btc-t:ro
+      - btc_p_state:/states/btc-p:ro
+      - eth_t_state:/states/eth-t:ro
+      - eth_p_state:/states/eth-p:ro
+      - sol_t_state:/states/sol-t:ro
+      - sol_p_state:/states/sol-p:ro
+      - xrp_t_state:/states/xrp-t:ro
+      - xrp_p_state:/states/xrp-p:ro
+      - doge_t_state:/states/doge-t:ro
+      - doge_p_state:/states/doge-p:ro
+      - ada_t_state:/states/ada-t:ro
+      - ada_p_state:/states/ada-p:ro
+      - link_t_state:/states/link-t:ro
+      - link_p_state:/states/link-p:ro
+      - avax_t_state:/states/avax-t:ro
+      - avax_p_state:/states/avax-p:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  btc_t_state:
+  btc_t_logs:
+  btc_p_state:
+  btc_p_logs:
+  eth_t_state:
+  eth_t_logs:
+  eth_p_state:
+  eth_p_logs:
+  sol_t_state:
+  sol_t_logs:
+  sol_p_state:
+  sol_p_logs:
+  xrp_t_state:
+  xrp_t_logs:
+  xrp_p_state:
+  xrp_p_logs:
+  doge_t_state:
+  doge_t_logs:
+  doge_p_state:
+  doge_p_logs:
+  ada_t_state:
+  ada_t_logs:
+  ada_p_state:
+  ada_p_logs:
+  link_t_state:
+  link_t_logs:
+  link_p_state:
+  link_p_logs:
+  avax_t_state:
+  avax_t_logs:
+  avax_p_state:
+  avax_p_logs:
+  shared4h_cache:

@@ -128,25 +128,16 @@ else
         && git pull --ff-only)
 fi
 
-# ----- Build and start -----------------------------------------------------
-log "Building image and starting bot (paper mode by default)"
-$DOCKER "cd '$REPO_DIR' && docker compose up -d --build"
-
-# ----- Verify --------------------------------------------------------------
-log "Waiting 5s for the container to settle..."
-sleep 5
-$DOCKER "cd '$REPO_DIR' && docker compose ps"
+# ----- Build the live image (nothing is STARTED — that is deliberate) ------
+# The live-first go-live program (deploy/LIVE.md, research/ROADMAP.md Phase 6)
+# starts the stack manually after the .env and both Bybit accounts are ready.
+log "Pre-building the live image (rofl-bot:4h-live)"
+$DOCKER "cd '$REPO_DIR' && docker compose -f docker-compose.bidir4h-live.yml build"
 
 echo
 echo -e "\033[1;32m=========================================="
-echo " rofl-bot is RUNNING in paper mode."
+echo " Box is ready. NOTHING is running yet."
 echo -e "==========================================\033[0m"
-echo
-echo "Quick commands (from $REPO_DIR):"
-echo "    docker compose logs -f         # tail live logs"
-echo "    docker compose ps              # status"
-echo "    docker compose down            # stop"
-echo "    docker compose restart bot     # restart"
 echo
 if [[ $DOCKER_REQUIRES_SG -eq 1 ]]; then
     echo -e "\033[1;33mIMPORTANT:\033[0m the docker group was added to your user."
@@ -155,7 +146,8 @@ if [[ $DOCKER_REQUIRES_SG -eq 1 ]]; then
     echo "    exec sg docker"
     echo
 fi
-echo "Next steps:"
-echo "  1. Set up Telegram (optional, see deploy/README.md)"
-echo "  2. Paper-trade for 2 weeks"
-echo "  3. Add real Bybit keys via .env to go live"
+echo "Next steps — follow deploy/LIVE.md in order:"
+echo "  1. Bybit main account + PULLBACK SUB-ACCOUNT (two accounts, required)"
+echo "  2. Write $REPO_DIR/.env (keys + Telegram; template in LIVE.md)"
+echo "  3. Preflight checks (both keys, clock, Telegram)"
+echo "  4. docker compose -f docker-compose.bidir4h-live.yml up -d"
