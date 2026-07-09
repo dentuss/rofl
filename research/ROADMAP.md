@@ -271,6 +271,35 @@ survivable dial needs a book Sharpe ~2.5–3. Route: stack ORTHOGONAL sleeves
 (third leg, tier-2 event machines, sleeves earning back in) on the trend
 book until the dial reaches it — not a single magic aggressive strategy.
 
+## Sharpe-stacking round 1 (2026-07-09) — book 1.5 → honest ~1.7
+
+Battery of 9 pre-registered candidates (sleeve law; user mandate: "complete
+freedom, let's get to sleeving"). Two seats, six deaths (FINDINGS has both
+tables), one literature save:
+
+- **XSMOM-21** (21d residual-vs-BTC momentum, weekly, QUAL23): full +1.00,
+  **pre-2023-08 +0.85** — first crypto sleeve positive through 2021+2022.
+  Corr to book 0.18. CAVEAT: decaying toward the present (last third +0.14,
+  2026 −0.7) — forward record adjudicates.
+- **MOP-TSMOM commodities** (canonical 12m spec on GC/SI/CL/BZ — Bybit now
+  lists all four as perps): **25-year gate PASS** (+0.53 every era), corr
+  to book −0.21. Our crypto stack on the same data FAILED (+0.06) — the
+  admissible-test budget on commodities is spent.
+- **Assembly v3**: BOOK+XSMOM IV → **Sh 1.74, IS 1.73 → OOS 1.81, dMDD
+  −1.8%**; recommended deployable BOOK60/XSMOM40 → 1.69 (OOS 1.74) —
+  capping the new sleeve below IV weight (the carry lesson, preemptive).
+  3-way IV prints 1.82 but IS 2.44 → OOS 1.03 (xsmom-heavy) — not
+  proposed. MOPTF joins only vol-normalized ~10% after its venue stage.
+
+Next steps (nothing touches capital before these):
+- [ ] XSMOM weekly paper executor (sleeves_paper.py pattern) + ≥8 weeks of
+      forward record — specifically watching the decay question
+- [ ] MOPTF: vol-normalize, then paper/min-size on the real Bybit contracts
+      (XAUUSDT/XAGUSDT/CLUSDT/BZUSDT — 4h funding intervals, synthetic
+      weekend pricing; measure both)
+- [ ] Re-assembly with forward data; only then a BOOK60/XSMOM40 capital
+      discussion. L1/L2 of the main book proceed unchanged in parallel.
+
 ## Scoreboard (fixed engine, full costs, SOFT5 unless noted)
 
 | date | config | CAGR | Sh(mo) | MDD | gates | status |
