@@ -291,14 +291,36 @@ tables), one literature save:
   3-way IV prints 1.82 but IS 2.44 → OOS 1.03 (xsmom-heavy) — not
   proposed. MOPTF joins only vol-normalized ~10% after its venue stage.
 
+## Sharpe-stacking round 2 (2026-07-09) — honest ~1.8, OOS 2.0 touched
+
+Six fresh pre-registered dimensions; 1 seat, 5 deaths (FINDINGS):
+
+- **XSBAB-60** (betting against beta, weekly quintiles): full +0.74, pre
+  +0.70, post +0.77 — era-symmetric, 2022 POSITIVE, corr to book −0.03 and
+  to XSMOM −0.02. The two cross-sectional sleeves peak in different eras.
+- Deaths: XSVOL-21 (+0.49, one hair short — no appeals), BREADTH-LF/LS
+  (the book's own exposure in a trenchcoat: corr 0.50/0.82), FNG-CONTRA
+  (−0.05: the brake is not an engine), DOMTREND-90 (ETHBTC family closed
+  both directions).
+- **Assembly v4 deployable: BOOK50/XSMOM25/XSBAB25 — Sh 1.80, IS 1.63 →
+  OOS 2.01, dMDD −2.1%, thirds +2.65/+1.15/+2.07**; @15% vol ≈ 28.5%
+  CAGR / dMDD −8.4%. Sleeve-heavy IV/CAP40 print 1.87–1.91 but hold only
+  14–17% book — not proposed (carry lesson). Cumulative scoreboard: book
+  1.53 → +XSMOM 1.74 → +XSBAB **1.80** with the book still majority.
+
 Next steps (nothing touches capital before these):
-- [ ] XSMOM weekly paper executor (sleeves_paper.py pattern) + ≥8 weeks of
-      forward record — specifically watching the decay question
+- [ ] XS paper executor covering BOTH cross-sectional sleeves (XSMOM-21 +
+      XSBAB-60, same weekly Monday cadence, sleeves_paper.py pattern) +
+      ≥8 weeks of forward record — XSMOM's decay question is the headline
 - [ ] MOPTF: vol-normalize, then paper/min-size on the real Bybit contracts
       (XAUUSDT/XAGUSDT/CLUSDT/BZUSDT — 4h funding intervals, synthetic
       weekend pricing; measure both)
-- [ ] Re-assembly with forward data; only then a BOOK60/XSMOM40 capital
+- [ ] Re-assembly with forward data; only then a BOOK50/XS25/BAB25 capital
       discussion. L1/L2 of the main book proceed unchanged in parallel.
+- [ ] Round 3 candidate pool (pre-register before running): tier-2 tick
+      studies at the 60-day collector mark; XS carry-momentum interaction
+      ONLY if the funding-family budget is formally re-opened; nothing else
+      currently clears the 10%-prior bar.
 
 ## Scoreboard (fixed engine, full costs, SOFT5 unless noted)
 
