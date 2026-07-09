@@ -2,7 +2,9 @@
 
 **The complete go-live runbook is [`deploy/LIVE.md`](LIVE.md)** — accounts,
 `.env`, preflight, start, week-1 checklist, kill criteria. This file only
-covers the box itself.
+covers the box itself. For running the KEYLESS parts (paper stack, tick
+collector, sleeve trackers) on a home machine instead, see
+[`deploy/SELFHOST.md`](SELFHOST.md).
 
 > The pre-2026-07 version of this guide (single-bot presets, the 5-pair
 > portfolio wrapper, +144%-CAGR claims) described the retired 1h program
