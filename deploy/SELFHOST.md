@@ -2,14 +2,14 @@
 
 What runs at home vs what never does:
 
-| runs on the laptop | stays on EC2 |
+| runs on the laptop | stays on the live box (EC2 → Oracle A1) |
 |---|---|
 | `docker-compose.bidir4h-paper.yml` — 16 paper legs + tg-control, **no keys** | `docker-compose.bidir4h-live.yml` — REAL MONEY |
 | `docker-compose.collector.yml` — tick collector, public websockets, **no keys** | |
 | daily `sleeves_paper.py` + `xs_paper.py` (cron, read-only public data) | |
 
 **Never put the trading keys on the laptop.** They are IP-whitelisted to the
-EC2 Elastic IP; a home IP is dynamic and a roaming machine is a bigger
+live box's reserved IP; a home IP is dynamic and a roaming machine is a bigger
 attack surface. Everything below is deliberately keyless (the only secret
 is the optional Telegram token).
 
@@ -144,5 +144,7 @@ Keep SSH key-only: in `/etc/ssh/sshd_config.d/hardening.conf` set
 Paper state is disposable by design (it's paper) — moving machines means
 `down -v` and fresh anchors EXCEPT the sleeve trackers, whose anchors you
 carry via the env vars in §5. The collector's data volume is the only thing
-worth migrating (§7 rsync). The live stack on EC2 is untouched by any of
-this and must never share a machine with experiments.
+worth migrating (§7 rsync). The live keys stay on the single IP-whitelisted
+box; keyless paper/collector may co-locate with the live stack (see
+`deploy/ORACLE.md` §5) or run here — just never run two LIVE portfolios on
+one machine.

@@ -15,8 +15,8 @@
 #   3. Installs the Docker Compose v2 plugin (not bundled on AL2023)
 #   4. Adds the current user to the docker group
 #   5. Clones the repo (if not already cloned)
-#   6. Builds the image and starts the bot in paper mode
-#   7. Verifies the container is running
+#   6. Pre-builds the live image (rofl-bot:4h-live) — STARTS NOTHING
+#   7. Prints next steps (deploy/LIVE.md); the stack is started manually later
 #
 # Notes:
 #   - The script must be runnable without prior docker access. It uses
