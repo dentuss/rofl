@@ -201,6 +201,18 @@ def vol_target_mult(closes: "pd.Series", target_ann: float,
 # file is missing or unreadable.
 WF_RETUNE_PRESETS = {"adaptive_inj_bidir_wf"}
 
+# Bybit non-VIP linear-perp fees, matching research/cost_engine.py exactly.
+# Booking used to charge FEE_TAKER on BOTH sides unconditionally, which
+# overstated cost on every maker leg: the deployed stack runs post-only maker
+# entries (ENTRY_LIMIT_ORDERS) and TP-as-limit exits (TP_LIMIT_ORDERS), so a
+# maker-in / TP-out round trip really costs ~4bp but was booked at 12bp. That
+# understates state.equity, which drives risk sizing, vol targeting and the
+# decay ladder — and would show up in L2's live-vs-engine reconcile as an
+# unexplained cost gap against the >0.2 Sh HALT criterion. Override for a VIP
+# tier via env. (2026-08-03)
+FEE_TAKER = float(os.getenv("FEE_TAKER", "0.0006"))
+FEE_MAKER = float(os.getenv("FEE_MAKER", "0.0002"))
+
 
 # ----------------------------- Configuration --------------------------------
 @dataclass
@@ -1636,8 +1648,20 @@ class Bot:
             elif reason == "tp":
                 fill_px = pos.tp
         gross = (fill_px - pos.entry_px) * pos.qty * pos.side
-        # Approx round-trip fee 0.06% per side on notional
-        fees = (pos.notional + fill_px * pos.qty) * 0.0006
+        # Per-side fee keyed off what ACTUALLY executed, not a flat taker rate.
+        #  - entry: maker iff this position was opened by a post-only limit
+        #    (ENTRY_LIMIT_ORDERS; live-only — paper takes market entries, so
+        #    paper honestly keeps the taker rate on entry).
+        #  - exit: maker iff the resting reduce-only TP limit was what filled.
+        #    `order is None` means our market close was rejected because the
+        #    exchange had already flattened us — i.e. the TP limit filled. A
+        #    bot-initiated market close on a "tp" reason is still taker. Paper
+        #    has no resting order, so it mirrors the engine's tp_as_limit.
+        entry_rate = FEE_MAKER if getattr(pos, "maker_entry", False) else FEE_TAKER
+        exit_maker = (self.cfg.tp_limit_orders and reason.startswith("tp")
+                      and (order is None or self.ex.paper))
+        exit_rate = FEE_MAKER if exit_maker else FEE_TAKER
+        fees = pos.notional * entry_rate + fill_px * pos.qty * exit_rate
         pnl = gross - fees
         pct = (pnl / pos.notional * 100) if pos.notional else 0.0
         self.state.equity += pnl

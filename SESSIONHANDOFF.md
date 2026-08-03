@@ -50,15 +50,41 @@ percentages are deposit-invariant, dollars shown on $1,800):
 
 | sizing | CAGR | Sh(mo) | dMDD | worst mo | median mo | final $ |
 |---|---|---|---|---|---|---|
-| **unit weights (L1/L2 runs here)** | 10.4% | 1.50 | −4.5% | −1.7% | +0.40% | 2,398 |
-| @15% vol dial (L3) | 22.2% | 1.49 | −9.2% | −3.5% | +0.79% | 3,210 |
-| @25% vol dial (L3) | 37.9% | 1.48 | −15.1% | −5.8% | +1.24% | 4,555 |
+| **unit weights (L1/L2 runs here)** | 9.5% | 1.33 | −5.6% | −3.6% | +0.35% | 2,358 |
+| @15% vol dial (L3, ×2.1) | 20.3% | 1.32 | −11.4% | −7.5% | +0.74% | 3,112 |
+| @25% vol dial (L3, ×3.5) | 34.4% | 1.32 | −18.3% | −12.2% | +1.23% | 4,322 |
+
+> **Re-measured 2026-08-03** (`deploy_report.py`, unmodified, on the Linux box;
+> 36 monthly obs, 21 positive). The previous row — 10.4% / 1.50 / −4.5% /
+> −1.7% — was written 2026-07-30, **mid-month, before July 2026 closed at
+> −3.64%** (the worst month in the whole common window; triple leg −5.61%).
+> That single month is the entire delta. Ruled out as causes: the regime GMM
+> **is** seeded (`random_state=42`), and the trailing partial-month artifact is
+> worth 0.01 Sh. Verified on pandas 3.0.5 / sklearn 1.9.0, 11/11 suites green.
+> Practical effect: the L1 halt line (−8% ≈ −$144) is unchanged but the
+> worst-month margin **halved** — ≈−$66 at $1,800, not ≈$31.
 
 **Anchor expectations on the full-history Sharpe ~1.2, not 1.5.** The
 2022-inclusive long-history gate PASSED at blend +1.20 full / **+0.18
 pre-2023-08** — the triple leg carries it (+0.57); the pull leg alone was
 **−2.57** pre-2023 and therefore has a pre-registered demotion trigger:
 *trailing-3-month forward Sharpe < 0 → drop to BLEND75 or triple-only.*
+
+> ⚠ **The trigger as written is under-powered — re-specify it BEFORE L1**
+> (2026-08-03, `research/book_recheck.py`). The PULL leg fires ~once per 6
+> weeks per name, so a 3-month window routinely contains almost no trades: its
+> last six backtest months are `0.00, 0.00, +0.46, −0.70, 0.00, −0.56` —
+> **three of six with no trades at all.** On that window the trailing-3mo
+> Sharpe reads **−3.93** (last6 −1.08, last12 +0.57) — i.e. it *would* fire,
+> off essentially two observations. A 3-month Sharpe cannot distinguish the
+> pre-2023 −2.57 disease from an ordinary quiet stretch in either direction,
+> so as written it will fire spuriously inside the first live quarter and
+> force an unjustified book change. Suggested replacement (needs the human's
+> call): trigger on **cumulative R over the last N≥20 PULL trades**, or a
+> trade-count-gated Sharpe that simply does not evaluate below a minimum
+> sample. Meanwhile the TRIPLE leg is stable on every horizon (full +1.27,
+> last12 +1.22, last6 +1.26, last3 +1.20). Nothing is firing today: the
+> trigger is defined on a forward live+paper record that does not exist yet.
 
 ## 2. Sizing at $1,800 (changed 2026-07-30 — read before deploying)
 

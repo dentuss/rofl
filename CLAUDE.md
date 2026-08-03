@@ -8,12 +8,24 @@ is the evidence ledger. Read all three before acting.
 implies a different deposit is stale — flag it. Percentages in the research
 tables are deposit-invariant; only dollar figures move.
 
+⚠ **On-exchange reality (read-only check, 2026-08-03): $1,797.14, and NOT
+where the deploy plan assumes.** Main uid 235719285 holds **$797.65 in the
+FUND wallet and $0.00003 in UNIFIED** (= the trading wallet the 8 `-t` legs
+draw on — they would start with zero margin); sub `roflbot_pullback` uid
+574595575 holds **$999.49 in UNIFIED**. So the split is 797.65 / 999.49, not
+the planned 900 / 900 — a ~25% size asymmetry between the `-t` and `-p` books
+that silently breaks the validated 50/50 blend. Before L1: move main's FUND →
+UNIFIED and rebalance both accounts to $898.57, or re-derive
+`LEG4H_LIVE_EQUITY` per account from the real balances. Main is flat (0
+positions); the sub needs its own key to confirm.
+
 ## The goal
 
 Build the highest **honest** risk-adjusted return this book can sustain, and
 run it live on real margin. Concretely: get the gate-validated trend book
-(live now, Sh ~1.5 common-window / ~1.2 full-history) safely through the
-staged go-live, then **stack orthogonal sleeves toward book Sharpe ~2.0+**
+(Sh **~1.33** common-window / ~1.2 full-history — re-measured 2026-08-03 after
+July 2026 closed at −3.6%; the older ~1.5 predates that month) safely through
+the staged go-live, then **stack orthogonal sleeves toward book Sharpe ~2.0+**
 (3 validated, in forward paper). "Honest" is the whole point — the original
 212% CAGR was an engine artifact; every number now is measured on the fixed
 engine with full costs or it does not exist.
@@ -65,7 +77,7 @@ engine with full costs or it does not exist.
   `PYTHONIOENCODING=utf-8 ./.venv/bin/python research/<x>.py`; heavy runs go
   to background Bash with `tee` to the scratchpad. Tests are plain-assert
   `__main__` runners (no pytest) — `./.venv/bin/python test_<x>.py`.
-  ⚠ ~50 research scripts still carry the old Windows `Run:` line in their
+  ⚠ 39 research scripts still carry the old Windows `Run:` line in their
   docstrings (`./.venv/Scripts/python.exe`) — that is cosmetic; on Linux
   substitute `./.venv/bin/python`. Only `collector.py` has real
   platform-specific code, and it is properly `sys.platform` guarded.

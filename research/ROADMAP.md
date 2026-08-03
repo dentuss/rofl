@@ -186,7 +186,15 @@ the book at this deposit. Known friction: BTC's 0.001 lot (≈$64) sits near
 the risk-scaled size → under-sized in normal vol, skips in high vol (L1
 measures the skip rate).
 
-- [ ] **L0 — Account isolation (one-time, before L1)**: the -t and -p legs
+- [x] **L0 — Account isolation — DONE** (verified read-only 2026-08-03): sub
+      `roflbot_pullback` uid 574595575 exists (created ~2026-07-07, UTA,
+      status normal) and holds $999.49 in UNIFIED. ⚠ Two things still open
+      before L1: main's capital sits in the **FUND** wallet ($797.65) with
+      **$0.00003 in UNIFIED**, so the 8 `-t` legs would start with no margin;
+      and the resulting split is 797.65/999.49, not the planned 900/900.
+      Rebalance to $898.57 each (or re-derive per-account
+      `LEG4H_LIVE_EQUITY`) before starting. Original spec below.
+- [ ] ~~L0 — Account isolation (one-time, before L1)~~: the -t and -p legs
       trade the SAME symbols; on one account they would net against each
       other and trip every reconcile guard (Pattern A). Create a Bybit
       SUB-ACCOUNT for the pullback book, transfer **$900.00**

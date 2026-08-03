@@ -43,6 +43,65 @@ shared the artifact), but nothing absolute survives, and any experiment whose
 treatment changed re-entry behavior (the SL-cooldown lift, TP chunking) is
 contaminated in magnitude too.
 
+## ⚠ 2026-08-03 — HEADLINE NUMBERS ARE STALE: the book had a bad July 2026
+
+`research/deploy_report.py` (canonical, unmodified) re-run 2026-08-03 on the
+Linux box does **not** reproduce the numbers quoted in CLAUDE.md and
+SESSIONHANDOFF. The cause is not an engine or version artifact — it is that
+**July 2026 closed at −3.64% on the blend (−5.61% on the triple leg), the
+worst month in the entire common window.** The docs were written 2026-07-30,
+mid-month, before that month closed.
+
+| metric (unit weights) | documented | 2026-08-03 | delta |
+|---|---|---|---|
+| CAGR% | 10.4 | **9.5** | −0.9 |
+| Sh(mo) | 1.50 | **1.33** | −0.16 |
+| dMDD% | −4.5 | **−5.6** | −1.1 |
+| worst month% | −1.7 | **−3.6** | −1.9 |
+
+Checked and excluded as causes: the GMM **is** seeded (`random_state=42`,
+`n_init=3`, core/regime.py:79), so this is not sampling noise; and the
+trailing partial month (Aug 1–3 entering the monthly series as a full
+observation via `resample("ME")`) is worth only **0.01 Sh** (1.33 → 1.34 with
+incomplete months dropped) — a real but immaterial harness wart, logged here
+rather than fixed. Verified on pandas 3.0.5 / scikit-learn 1.9.0 / ccxt
+4.5.70, all 10 test suites green.
+
+**Consequences.** (1) Go-live sizing conversations must quote 9.5% / 1.33 /
+−5.6%, not 10.4 / 1.50 / −4.5. (2) The L1 halt line (−8% ≈ −$144) is
+unchanged but the margin has halved: worst month is now ≈**−$66** at $1,800,
+not ≈$31. (3) The full-history anchor of Sh ~1.2 is *better* calibrated than
+it looked — the common-window premium shrank from +0.30 to +0.13.
+
+## ⚠ 2026-08-03 — PULL leg deteriorating; the demotion trigger is UNDER-POWERED
+
+Leg decomposition of the deployed blend on the same window
+(`research/book_recheck.py`):
+
+| leg | full Sh | last 12mo | last 6mo | last 3mo |
+|---|---|---|---|---|
+| TRIPLE (`-t`) | +1.27 | +1.22 | +1.26 | +1.20 |
+| **PULL (`-p`)** | +1.14 | **+0.57** | **−1.08** | **−3.93** |
+| BLEND50 | +1.34 | +1.19 | +1.14 | +1.00 |
+
+The triple leg is stable across every horizon; all of the blend's recent
+weakness is PULL. The pre-registered trigger ("trailing-3-month Sharpe < 0 →
+BLEND75 or triple-only") reads −3.93 on this backtest analogue — i.e. it
+would fire.
+
+**But it would be firing on noise, and that is the actual finding.** PULL's
+last six monthly returns are 0.00, 0.00, +0.46, −0.70, 0.00, −0.56: the leg
+fires ~once per 6 weeks per name, so **three of the last six months contain no
+trades at all** and the −3.93 is computed from essentially two nonzero
+observations. A 3-month Sharpe has no power to distinguish the pre-2023 −2.57
+disease from an ordinary quiet stretch in *either* direction.
+
+**Recommendation (not adopted — needs the human's call): re-specify the
+trigger on trade count or cumulative R before L1, not after.** As written it
+will fire spuriously inside the first live quarter and force an unjustified
+book change. The trigger is defined on the FORWARD live+paper record, which
+does not exist yet, so nothing is firing today.
+
 ## Adopted (live in production)
 
 > ⚠ The performance numbers in this table predate the 2026-07-05 same-bar
@@ -116,6 +175,8 @@ entries at 0.02%, real per-pair funding, 2 bps slip on taker legs).
 | **Walk-forward param re-tune on 4h — re-trial** (2026-07-06) | The honest stitched version (27-combo grid scored on trailing 365d, refit every 90d, zero look-ahead): WF Sh 1.15 / 15.3% vs FIXED (9,26,55) 1.36 / 18.6% — worse on every metric, and the param timeline churns at ~70% of refits (LINK's rare stable stretch didn't save the book). Confirms the artifact-era lesson honestly: periodic re-selection overfits the trailing window; params stay frozen. | wf_retune4h.py |
 | **Stacking round 2 — the five deaths** (2026-07-09) | Same sleeve law, five fresh dimensions: **XSVOL-21** (dollar-volume/attention momentum): +0.49 — missed the 0.5 bar by a hair, no appeals; **BREADTH-LF/LS** (participation timing of the majors basket): +0.52 but corr to book at the 0.5 boundary and pre +0.34 / LS +0.30 with corr 0.82 — breadth is the book's own exposure in a trenchcoat; **FNG-CONTRA** (entrenched-extreme contrarian as an ENGINE): −0.05 — the F&G brake is not an engine, validating its defensive-only role; **DOMTREND-90** (ETH/BTC dominance trend): −0.01 with pre −0.72 — with MR already dead, the ETHBTC family is now fully closed. | sleeve_battery2.py |
 | **Stacking round 1 — the six deaths** (2026-07-09) | Pre-registered battery (sleeve law: full ≥ 0.5, pre-2023-08 ≥ 0.0, \|corr\| ≤ 0.5): **crypto-stack-on-commodities** (our exact 1d triple+pull on GC/SI/CL/BZ, 24y): full **+0.06** — the crypto-tuned fast-trend clock does not carry to TradFi (2015-19 trend winter −0.71); **CHOP-MR** (BB fades only in CHOP, MAJORS8 4h): **−1.24**, negative every year — the CHOP label means "no directional edge", not "fade edge"; its information is fully spent as a sizing signal; **ETHBTC-MR** (4h ratio z-score): −0.79; **XSMOM-14**: +0.46 (k=21 sibling passed — see Under Validation); **CORE-MA200** BTC+ETH (long-flat/long-short): +0.50/+0.56 borderline but pre weak (+0.31/+0.41) and LS corr to book 0.57 — also largely embedded in the trend book already; **calendar** (turn-of-month +0.23, weekend +0.44 with pre −0.13): too weak. | sleeve_battery.py, tradfi_sleeve.py, chop_mr_sleeve.py |
+| **Time stop `max_bars_in_trade` relaxation (TIMESTOP-4H)** (2026-08-03) | Audit of an INHERITED default, not a new overlay: `max_bars_in_trade=96` is dated by its own comment ("96 bars = 24h on 15m, 4d on 1h", core/backtest.py:26) and was never re-examined on 4h, where it forces exit at **16 days**. It is live in both paths (engine core/backtest_enhanced.py:172; bot.py:1068 via `MAX_BARS`, set in NO compose → live inherits 96), and the preset tuple carries no `max_bars`, so parity holds and every honest-era number was measured with it. Pre-registered prior: "winners must run" (partial-TP rejected twice, TP widening monotone) predicts relaxing helps. **The prior was WRONG.** Monotone ladder T96/T180/T360/TOFF: Sh(mo) 1.33 / **1.38** / 1.33 / 1.32, CAGR 9.5 / 9.4 / 9.0 / **8.9**. Best cell T180 cleared bars (b) IS+OOS both up, (c) thirds all +, (d) dMDD −4.8 vs −5.6 — but **failed (a) ΔSh ≥ +0.10 at only +0.05**, inside the documented 0.03–0.05 run-to-run jitter band. INCONCLUSIVE → the inherited 96 stands. Mechanism (the real finding): time-exits are 5.5% of trades at mean **+1.07R** — *profitable*, not bleeding — and letting them run is slightly worse. A position that has meandered 16 days without touching a 1.8-ATR stop or a 6-ATR target is a different population (chop) than a running winner; "winners must run" has a boundary and the inherited 96 sits near it by accident. Footnote for a future re-trial: dMDD is −4.8 for T180/T360/TOFF *identically* vs −5.6 for T96, which is not noise-shaped and suggests the 16d cap deepens one specific drawdown episode. G3 N/A (no entry logic touched); G4/G5 not run — nothing here is promotable. | timestop_4h.py |
+| **`bot.py` signal-flip parity claim is STALE** (2026-08-03) | bot.py:1046 documents a deliberate engine-vs-live divergence (backtest closes+reverses on an opposite signal; live holds through flips) justified as "**<1% of exits**, immaterial", measured on 5 pairs of **1h SOFT5-era** data — and the comment itself says "re-measure if exit logic ever changes". It has changed completely since (4h, tp6, maker entries, TP-as-limit, K=3 cooldown). Measured on the deployed book: **triple 54/1740 = 3.1%** of exits (meanR −0.22, medR −0.31, mean 71.5 bars held), pull 2/182 = 1.1%, combined **2.9% — ~3× the documented claim**. Materiality: ≈−12R of the ≈+271R net over the window (~4% of net profit) that the engine books and live does not. Small, but "immaterial" and "<1%" are both now factually wrong. NOT a bug and NOT a change — the divergence is deliberate and may well favour live; the ask is to update the comment with the measured number and make the choice deliberately rather than on a stale measurement. | timestop_4h.py |
 | **Conditioned sleeve variants — redesign round** (2026-07-06) | Diagnosis first: 2021 universe is THIN (median 13/23 names with data); funding dispersion has secularly COLLAPSED (median cross-sec std of 7d funding 43bp 2021 → 15bp 2023 → 7bp 2025), and corr(carry month, LAGGED dispersion) = **−0.27** — the "carry pays when dispersion is fat" hypothesis is REFUTED: fat dispersion was the 2021 funding mania that whipsaws a 7d rank (short-the-expensive names that keep mooning), while carry's actual profits came from the thin-dispersion 2024–25 era. corr(TSMOM month, \|BTC month\|) = **+0.25** — TSMOM earns in big-move months, so a calm/vol filter trims exactly the wrong months. All three pre-registered variants (lagged rolling-quantile gates, no fitted constants, early history defaults to TRADING so a gate can't hide the bleed) **FAIL the full-history gate** (need full Sh ≥ 0.5 AND pre-2023-08 ≥ 0.0): TSMOM_STRONG full +0.21 / pre −0.68; TSMOM_CALM +0.17 / −0.59; CARRY_GATED +0.26 / −0.40 (direction right but far from the bar, and it kills 2025: +1.8 → −0.2). Caveats: the 2021 "whipsaw" count (451 flips/name) is contaminated by missing-data NaN transitions — the honest 2021 signal is universe thinness, not measured churn; the harness's simplified common frame gives slightly different ref numbers than the sleeve scripts (carry pre −0.67 vs −0.34) but the same shape and verdict. **Conclusion: the pre-2023 bleed has no exploitable structure under honest conditioning. Sleeves remain prove-it-forward only; leverage stays BLOCKED; the trend book (MAJORS8, Sh 1.42) remains the only leverage-eligible component.** | sleeve_diagnosis.py |
 
 ## Promising — UNDER VALIDATION (not adopted; do not deploy on this evidence)
