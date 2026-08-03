@@ -179,6 +179,47 @@ entries at 0.02%, real per-pair funding, 2 bps slip on taker legs).
 | **`bot.py` signal-flip parity claim is STALE** (2026-08-03) | bot.py:1046 documents a deliberate engine-vs-live divergence (backtest closes+reverses on an opposite signal; live holds through flips) justified as "**<1% of exits**, immaterial", measured on 5 pairs of **1h SOFT5-era** data — and the comment itself says "re-measure if exit logic ever changes". It has changed completely since (4h, tp6, maker entries, TP-as-limit, K=3 cooldown). Measured on the deployed book: **triple 54/1740 = 3.1%** of exits (meanR −0.22, medR −0.31, mean 71.5 bars held), pull 2/182 = 1.1%, combined **2.9% — ~3× the documented claim**. Materiality: ≈−12R of the ≈+271R net over the window (~4% of net profit) that the engine books and live does not. Small, but "immaterial" and "<1%" are both now factually wrong. NOT a bug and NOT a change — the divergence is deliberate and may well favour live; the ask is to update the comment with the measured number and make the choice deliberately rather than on a stale measurement. | timestop_4h.py |
 | **Conditioned sleeve variants — redesign round** (2026-07-06) | Diagnosis first: 2021 universe is THIN (median 13/23 names with data); funding dispersion has secularly COLLAPSED (median cross-sec std of 7d funding 43bp 2021 → 15bp 2023 → 7bp 2025), and corr(carry month, LAGGED dispersion) = **−0.27** — the "carry pays when dispersion is fat" hypothesis is REFUTED: fat dispersion was the 2021 funding mania that whipsaws a 7d rank (short-the-expensive names that keep mooning), while carry's actual profits came from the thin-dispersion 2024–25 era. corr(TSMOM month, \|BTC month\|) = **+0.25** — TSMOM earns in big-move months, so a calm/vol filter trims exactly the wrong months. All three pre-registered variants (lagged rolling-quantile gates, no fitted constants, early history defaults to TRADING so a gate can't hide the bleed) **FAIL the full-history gate** (need full Sh ≥ 0.5 AND pre-2023-08 ≥ 0.0): TSMOM_STRONG full +0.21 / pre −0.68; TSMOM_CALM +0.17 / −0.59; CARRY_GATED +0.26 / −0.40 (direction right but far from the bar, and it kills 2025: +1.8 → −0.2). Caveats: the 2021 "whipsaw" count (451 flips/name) is contaminated by missing-data NaN transitions — the honest 2021 signal is universe thinness, not measured churn; the harness's simplified common frame gives slightly different ref numbers than the sleeve scripts (carry pre −0.67 vs −0.34) but the same shape and verdict. **Conclusion: the pre-2023 bleed has no exploitable structure under honest conditioning. Sleeves remain prove-it-forward only; leverage stays BLOCKED; the trend book (MAJORS8, Sh 1.42) remains the only leverage-eligible component.** | sleeve_diagnosis.py |
 
+## Bot-type taxonomy triage (2026-08-03) — 32 architectures vs this ledger
+
+Source: `research/Trading Bot Types Reference.pdf` (32 bot types) and
+`research/BOT_ARCHITECTURE.md.pdf` (a modular "trading OS" design). Recorded
+so the dead column cannot be re-litigated later. **Yield: 3 of 32 untested.**
+
+**The central proposal of BOT_ARCHITECTURE.md — Module 5 "Strategy Selector"
+(detect regime → score strategies by confidence → hand control to the winner)
+plus Module 12 periodic re-ranking — is the most-rejected idea in this ledger.**
+Four independent tests: dynamic rebalance on trailing-3mo Sharpe (+4% vs
++2358% for static equal weight, 4.6y); walk-forward param retune (rejected
+twice — 1.15 vs 1.36 frozen, params churn at 70% of refits); IS-performance
+name selection (75th/43rd/76th pct OOS); ML entry filter (calibrated, no
+discrimination). Generalised by the meta-conclusion: predictive/defensive
+selection fails because the losses it targets are not predictable from
+signals available at decision time.
+
+**What survives is the distinction we already paid for: regime information is
+worth a great deal as a RISK DIAL (CHOP half-size, CONF sizing — both adopted)
+and nothing as a SELECTOR.** The supported architecture is therefore *blend,
+don't select*: orthogonal payoff shapes at fixed pre-registered weights, which
+is what BOOK50/XSMOM25/XSBAB25 already is. No new architecture is needed.
+
+| status | count | types | governing evidence |
+|---|---|---|---|
+| **Dead — do not re-test** | 19 | Trend (= the deployed book), Mean Reversion, Breakout, Momentum, Sentiment-as-engine, Funding, Correlation, Pairs, Seasonal, ML, RL, Copy Trading, Portfolio Rebalancing (already adopted), Position, Swing, News, Pattern Recognition, Smart Money (ICT/SMC), DCA | CHOP-MR −1.24, BB-MR −0.95, ETHBTC-MR −0.79, donchian OOS −0.28/−0.24, MACD ≤0.45, FNG-CONTRA −0.05, funding IC≈0, calendar +0.23/+0.44 w/ pre −0.13, ML no discrimination, XSVOL +0.49, BREADTH corr 0.82, DOMTREND −0.01. Pattern Recognition and Smart Money have no falsifiable spec — they fail law 2 (pre-registration) before they can be run. Copy Trading is a survivorship leaderboard (same illusion as the grid ROI counter). |
+| **Tick-gated** | 8 | Market Making, Scalping, Order Flow, HFT, Arbitrage, Liquidation, Volume, part of Volatility | Bar-data versions already died in the tier-1 moonshot battery at the 22bp taker floor (0/6). Blocked on `collector.py`, which is NOT running — and tick history cannot be backfilled. |
+| **Genuinely untested** | **3** | **Grid / short-gamma**, **Avellaneda–Stoikov inventory MM**, **IV-vs-RV variance risk premium** | The convexity gap: every sleeve in the stack is long-gamma (trend) or cross-sectional. No short-vol payoff has ever been tested here. |
+
+⚠ **REFUSED on principle, not on evidence: Martingale DCA.** Doubling into
+losers is anti-Kelly with unbounded loss and is the exact inverse of the
+adopted decay ladder (cut risk at −20/−35/−50%). It also produces the
+prettiest possible equity curve until it doesn't. If it ever appears in a
+config that is a bug, not a strategy.
+
+⚠ **Test-budget warning (law 2).** `sleeve_battery2` states the arithmetic:
+"6 cells; expect ~0–1 false positives at this bar." Running the full taxonomy
+would mean 100+ cells at a 5% bar — that manufactures ~5 winners from pure
+noise, indistinguishable from real ones. The stack improves by adding ONE
+orthogonal payoff shape that survives 2022, not twenty that survived a search.
+
 ## Promising — UNDER VALIDATION (not adopted; do not deploy on this evidence)
 
 | Idea | Preliminary result | Caveats | Script |
