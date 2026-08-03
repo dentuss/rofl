@@ -39,9 +39,15 @@ idle `-p` containers are CORRECT, not broken.
 
 ## 1. Box prep (one-time) — `deploy/setup.sh`
 
+> ⚠ The host is now **Oracle A1 (free)**, not EC2. Run
+> `deploy/init-trading.sh` instead of the manual steps below — it does clock,
+> swap, Docker, `.env` template and the build, then deliberately stops. See
+> `deploy/ORACLE.md`. The EC2 path is kept for reference.
+
 On a fresh EC2 instance — **t4g.medium WITH a 4 GB swapfile, or t4g.large**
-(17 Python containers ≈ 3.5–4.4 GB resident; see the sizing note + swap
-snippet in `deploy/README.md`) — as `ec2-user`/`ubuntu` (not root):
+(17 Python containers ≈ 3.3 GB resident — measured 2026-08-03 as 124 MB
+shared + 198 MB private per leg; see `deploy/ORACLE.md` §2) — as
+`ec2-user`/`ubuntu` (not root):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/dentuss/rofl/main/deploy/setup.sh | bash

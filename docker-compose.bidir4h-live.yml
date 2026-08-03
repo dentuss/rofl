@@ -58,6 +58,13 @@ x-bot: &bot-defaults
   build: .
   image: rofl-bot:4h-live
   restart: unless-stopped
+  # Measured 2026-08-03 on the real image: 198 MB PRIVATE per leg (322 MB RSS,
+  # but 124 MB of that is library pages shared across all legs from the one
+  # image — see deploy/ORACLE.md §2). 512m is ~2.5x the marginal cost, so a
+  # leaking leg is killed and restarted by Docker instead of OOMing a 10 GB
+  # box and taking the other 15 legs with it.
+  mem_limit: 512m
+  memswap_limit: 768m
   healthcheck:
     test: ["CMD-SHELL", "[ $(($(date +%s) - $(stat -c %Y /app/state/heartbeat 2>/dev/null || echo 0))) -lt 300 ]"]
     interval: 60s

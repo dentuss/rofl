@@ -180,6 +180,8 @@ from today and the 8-week clock resets.
 | `deploy/ORACLE.md` | Oracle A1 hosting runbook (**the current host plan**) |
 | `deploy/SELFHOST.md` | running the keyless stack on a home laptop |
 | `deploy/setup.sh` | box prep: docker + compose + clone + prebuild; **starts nothing** |
+| `deploy/init-collector.sh` | one-shot collector box (1 OCPU / 2 GB): clock, swap, docker, QUAL23 symbols, **starts collecting** — no keys involved |
+| `deploy/init-trading.sh` | one-shot trading box (1 OCPU / 10 GB): clock, swap, docker, `.env` template, image build — **deliberately starts nothing** |
 | `test_*.py` | plain-assert suites (no pytest): engines, sizing, maker entries, TP limits, reduce-only, exec parity |
 
 Older `research/` scripts from dead eras are kept deliberately — the
@@ -224,19 +226,35 @@ line — cosmetic; substitute `./.venv/bin/python`.
 
 ## 9. Immediate next actions (in order)
 
-1. **Linux laptop**: §8 checklist — venv, tests green, trackers re-anchored.
-2. **Oracle A1 box**: `deploy/ORACLE.md` — upgrade tenancy to **Pay-As-You-Go
-   first** (idle-reclamation would otherwise kill a live box under a
-   position), reserve a static IP, re-whitelist **both** Bybit keys to it.
-3. **Confirm the exchange is flat** before restarting live (the bot has been
-   down twice; §10 covers what resume does).
-4. **Resume L1** with `LEG4H_LIVE_EQUITY=112.50` and actual balances
-   ($900/$900). Watch for the first `PENDING … maker limit` → `OPEN …
+> **Superseded 2026-08-03 — the authoritative version is now
+> `research/ROADMAP.md` → "OPERATING PLAN", which carries the three tracks
+> and the full IF→THEN table. Summary only here.**
+
+1. **COLLECTOR FIRST — it is gated on nothing.** Oracle A1, own 1 OCPU / 2 GB
+   box, `deploy/init-collector.sh`. No keys, no capital, no stage gate. Tick
+   history cannot be backfilled, so every day it is off is permanently lost;
+   8 of the 32 surveyed bot types are blocked on it. Do this today.
+2. **Laptop**: §8 checklist (done 2026-08-03 — venv built, 11/11 suites green
+   on Python 3.14.4 / pandas 3.0.5 / sklearn 1.9.0). Trackers still need
+   re-anchoring with `SLEEVES_ANCHOR` / `XS_ANCHOR`.
+3. **Trading box**: `deploy/init-trading.sh` (prepares, starts nothing).
+   Upgrade the tenancy to **PAYG first**, reserve a static IP, re-whitelist
+   **both** Bybit keys to it.
+4. **L0.5 — fix the capital split (blocks L1).** Main's $797.65 sits in the
+   FUND wallet with ~$0 in UNIFIED, so the 8 `-t` legs would start with no
+   margin; the sub holds $999.49. Move FUND → UNIFIED, rebalance to ~$898.57
+   per account, derive `LEG4H_LIVE_EQUITY` from the real balances (NOT the
+   stale 112.50), and confirm both accounts flat.
+5. **Resume L1.** Watch for the first `PENDING … maker limit` → `OPEN …
    (maker fill)` pair, the first TP-limit fill, and BTC's skip rate.
-5. Start **paper + collector** (same box or laptop) and cron both trackers.
-6. **~8 weeks after 2026-07-09**: XS forward record matures → re-assembly on
+6. **Re-specify the PULL demotion trigger** before L1 concludes (§1 warning).
+7. **~8 weeks after 2026-07-09**: XS forward record matures → re-assembly on
    forward data → the BOOK50/XS25/BAB25 capital discussion (converges with
    the L3 dial decision).
+
+The paper twin is **not** recommended on the Oracle box: the program is
+live-first, paper cannot produce real fills, and its stagger offsets collide
+with live's (same `crc32(symbol)`). Use `FETCH_STAGGER_SECS=90` if you run it.
 
 ## 10. What resume-after-downtime does
 

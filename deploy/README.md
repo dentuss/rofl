@@ -1,4 +1,13 @@
-# EC2 deployment
+# EC2 deployment — SUPERSEDED
+
+> ⚠ **The current host plan is Oracle Cloud A1 (free), not EC2 — see
+> [`deploy/ORACLE.md`](ORACLE.md).** At L1 unit weights the book earns
+> ~$9–17/mo, so a ~$30/mo EC2 consumes the entire edge; that is why the box
+> moved. The instance sizing below (t4g.medium/large, 24 GiB) is retained for
+> reference only. Current measured footprint is **124 MB shared + 198 MB
+> private per leg** → 16 legs ≈ 3.29 GB (ORACLE.md §2), hosted on a 2 OCPU /
+> 12 GB free allowance split across two VMs. Use
+> `deploy/init-collector.sh` and `deploy/init-trading.sh` to build them.
 
 **The complete go-live runbook is [`deploy/LIVE.md`](LIVE.md)** — accounts,
 `.env`, preflight, start, week-1 checklist, kill criteria. This file only

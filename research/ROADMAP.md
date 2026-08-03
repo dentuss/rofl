@@ -26,6 +26,79 @@ the full cost model — no exceptions.**
 4. Artifact-era results are void. Pre-2026-07-05 rejections may be RE-TRIED;
    pre-2026-07-05 adoptions may be RE-CHALLENGED.
 
+## OPERATING PLAN — from 2026-08-03 (read this first)
+
+### Where we actually are
+
+- **Nothing is trading. Nothing is collecting.** Both are stopped.
+- Capital **$1,797.14** on-exchange, in the WRONG wallets: main has $797.65
+  in FUND + $0.00003 in UNIFIED (the `-t` legs would start with zero margin);
+  sub `roflbot_pullback` has $999.49 in UNIFIED. Split is 797.65/999.49, not
+  the planned 900/900.
+- Book re-measured 2026-08-03: **CAGR 9.5%, Sh(mo) 1.33, dMDD −5.6%, worst
+  month −3.6%** at unit weights (the older 10.4/1.50/−4.5/−1.7 predates July
+  2026 closing at −3.64%).
+- Code: per-side maker/taker fee booking fixed; 11/11 suites green on
+  Python 3.14.4 / pandas 3.0.5 / sklearn 1.9.0.
+- Hosting: Oracle A1, **2 OCPU / 12 GB free**, split into a 1/2 collector box
+  and a 1/10 trading box (`deploy/ORACLE.md`).
+
+### Three tracks. A runs NOW; B is gated; C needs no capital.
+
+**TRACK A — DATA (no keys, no capital, no gate — start today)**
+
+- [ ] **A1. Collector up** on its own box: `deploy/init-collector.sh`.
+      QUAL23 universe, ~7.7 GB/yr. *Every day this is off is a day of tick
+      history that can never be recovered.* Highest value-per-effort action
+      available, and it is blocked on nothing.
+- [ ] A2. **+30 days** → data-sanity study (gap rate, liquidation print
+      counts, book-snapshot coverage). Not a strategy study.
+- [ ] A3. **+60 days** → tier-2 moonshot studies unlock (liquidation cascades,
+      funding-settlement microstructure, book imbalance). 8 of the 32
+      taxonomy bot types are gated on exactly this.
+
+**TRACK B — CAPITAL (sequential; no stage starts before the previous is green)**
+
+- [x] **L0 — account isolation.** DONE (sub exists, verified 2026-08-03).
+- [ ] **L0.5 — CAPITAL SPLIT (NEW, blocks L1).** Move main FUND → UNIFIED;
+      rebalance to ~$898.57 per account; set `LEG4H_LIVE_EQUITY` =
+      real per-account balance / 8. Confirm BOTH accounts flat. Until this is
+      done, starting the stack means 8 legs with no margin and a 25% size
+      asymmetry that breaks the validated 50/50 blend.
+- [ ] **L1 — shakedown, ≥2 weeks**, full deposit at unit weights. Halt line
+      **−8% ≈ −$144**. Week-1 checklist in `deploy/LIVE.md` §5.
+- [ ] **L2 — measurement, 2–4 weeks.** Reconcile live vs engine; feed measured
+      slippage/fill-rate/funding back into the cost model.
+- [ ] **L3 — vol dial.** 15% first (×2.1); 25% is a separate later decision.
+
+**TRACK C — RESEARCH (no capital at risk)**
+
+- [ ] **C1. Re-specify the PULL demotion trigger** *before* L1 concludes. As
+      written (trailing-3mo Sharpe < 0) it fires off ~2 observations and will
+      trip spuriously in the first live quarter — see FINDINGS 2026-08-03.
+      Replace with cumulative R over ≥20 PULL trades, or a trade-count gate.
+- [ ] **C2. Grid / short-gamma sleeve**, pre-registered, validated against the
+      real 2-day bot result first, then run through 2022 against the sleeve
+      law. The only untested payoff shape in the stack. Prediction on record:
+      **it dies pre-2023.**
+
+### IF → THEN (pre-registered responses; decide now, not at 3am)
+
+| trigger | response |
+|---|---|
+| Book −8% from L1 start (≈ −$144) | **HALT everything, flatten, post-mortem before any restart.** Not a dial-down — a stop. |
+| A single leg HALTs on a reconcile guard | Leave it halted. Investigate that leg only. **Never** blanket-restart to clear a halt. |
+| Bybit rejects a post-only entry | Set `ENTRY_LIMIT_ORDERS=0` for that leg, record the economics delta (maker→taker is +4bp/side). |
+| Bybit rejects the TP limit attach | Set `TP_LIMIT_ORDERS=0`, record the delta. Both fallbacks are documented in the compose. |
+| BTC min-notional skips >30% of its signals | A **sizing** decision, not a strategy change: fund the BTC legs specifically or run ex-BTC. Re-validate weights either way. |
+| Measured costs degrade the edge >0.2 Sh (L2) | HALT, re-price the cost model, re-run the gate battery before resuming. |
+| PULL cumulative R < 0 over ≥20 trades | Demote to BLEND75 or triple-only (per C1's re-specified trigger — **not** the 3-month Sharpe). |
+| A month closes worse than −5% | Not an automatic halt: backtest worst is −3.6% and the tail is real. Do re-check realised dMDD against the model. |
+| Live equity diverges >1% from the exchange | Check **per-leg**, never per-bot-vs-account-wide (Pattern: a $112 leg vs a $900 account reads as a false −85%). Suspect the fee model first. |
+| Bybit auth failures | Check NTP/clock skew first — it is the single most common cause. |
+| A box is reclaimed or dies | Positions are safe (exchange-side SL/TP fire regardless). Rebuild from the init script; resume reconciles and HALTs anything it didn't open. |
+| Collector gap >24h | Record the gap in the data log and move on. **Never** synthesise or backfill ticks — a fake row poisons every study built on it. |
+
 ## Phase 1 — Paper the validated base (NOW)
 
 - [x] Engine fixed + validated (honest_rebuild r1–r3)
