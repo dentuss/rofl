@@ -2,7 +2,8 @@
 
 This is the complete deployment guide for the **live-first program**
 (research/ROADMAP.md, Phase 6). Follow it top to bottom; every section gates
-the next. The deposit this runbook is sized for: **$2,177.56 USDT total**.
+the next. The deposit this runbook is sized for: **$1,800.00 USDT total**
+(updated 2026-07-30; was $2,177.56).
 
 **What you are deploying** — the promoted trend book, every layer gate-passed
 on the fixed engine with full costs (see `research/FINDINGS.md`):
@@ -19,13 +20,14 @@ on the fixed engine with full costs (see `research/FINDINGS.md`):
 - 16 bot containers + 1 Telegram control panel, one compose file
 
 **Honest expectations at unit weights** (what L1/L2 runs; fixed engine, real
-funding, 2023-08 → 2026-07, start $2,177.56 — `research/deploy_report.py`):
+funding, 2023-08 → 2026-07, start $1,800.00 — `research/deploy_report.py`;
+percentages are deposit-invariant, only the final-$ column scales):
 
 | | final$ | CAGR | Sh(mo) | dMDD | worst day | worst month | win% | IS → OOS |
 |---|---|---|---|---|---|---|---|---|
-| **UNIT WEIGHTS (live now)** | 2,901 | **10.4%** | **1.50** | **−4.5%** | −1.5% | −1.7% | 57 | 1.47 → 1.51 |
-| @15% vol (x2.1) — L3 later | 3,883 | 22.2% | 1.49 | −9.2% | −3.1% | −3.5% | 57 | 1.46 → 1.50 |
-| @25% vol (x3.5) — L3 later | 5,510 | 37.9% | 1.48 | −15.1% | −5.2% | −5.8% | 57 | 1.44 → 1.49 |
+| **UNIT WEIGHTS (live now)** | 2,398 | **10.4%** | **1.50** | **−4.5%** | −1.5% | −1.7% | 57 | 1.47 → 1.51 |
+| @15% vol (x2.1) — L3 later | 3,210 | 22.2% | 1.49 | −9.2% | −3.1% | −3.5% | 57 | 1.46 → 1.50 |
+| @25% vol (x3.5) — L3 later | 4,555 | 37.9% | 1.48 | −15.1% | −5.2% | −5.8% | 57 | 1.44 → 1.49 |
 
 Anchor on the **full-history Sharpe ~1.2** (the 2022-inclusive gate), not the
 table's 1.5: expect the live experience to be *worse* than the common-window
@@ -61,22 +63,22 @@ would net against each other (a pullback short literally reduces the triple
 long) and trip every reconcile guard. The pullback book therefore lives on a
 **sub-account**.
 
-**Main account (triple book, $1,088.78):**
+**Main account (triple book, $900.00):**
 1. Unified Trading Account, USDT in UTA (not Funding), **Cross margin**,
    **One-Way** position mode (never Hedge).
 2. API key: permissions *Contract → Orders + Positions* ONLY — **no
-   withdrawal, no transfer**. **IP-whitelist the EC2 public IP** (the single
-   most important security control).
+   withdrawal, no transfer**. **IP-whitelist the live box's static IP**
+   (the single most important security control).
 
-**Sub-account (pullback book, $1,088.78):**
+**Sub-account (pullback book, $900.00):**
 1. Bybit → Account → Subaccount Management → create a **Standard**
    sub-account with UTA.
-2. Transfer **$1,088.78 USDT** main → sub ($300.02 for BTC-p + 7 × $112.68).
+2. Transfer **$900.00 USDT** main → sub (8 `-p` legs × $112.50).
 3. Same margin/position-mode settings as main (Cross, One-Way).
 4. Cut the sub-account its **own API key**: same trade-only permissions,
    same IP whitelist.
 
-Leave **$1,088.78** on the main account for the triple book. After the
+Leave **$900.00** on the main account for the triple book. After the
 transfer, main and sub each hold half the book.
 
 ## 3. `.env` — the only place secrets live
@@ -97,21 +99,20 @@ PULL_API_SECRET=your_SUB_secret
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
 
-# --- sizing (defaults already match the $2,177.56 deposit) ---------------
-# BTC4H_LIVE_EQUITY=300.02
-# LEG4H_LIVE_EQUITY=112.68
+# --- sizing (default already matches the $1,800.00 deposit) --------------
+# LEG4H_LIVE_EQUITY=112.50      # all 16 legs; 16 x 112.50 = 1800.00
 EOF
 chmod 600 .env
 ```
 
 Compose reads `.env` automatically from the repo directory. The per-leg
-splits are compose defaults — you only uncomment the two sizing lines to
-override them (L3 dial-ups later happen here).
+split is a single compose default — uncomment that one line to override it
+(a deposit change or an L3 dial-up is just this number).
 
 ## 4. Preflight (do not skip)
 
 ```bash
-# Keys talk to Bybit and see the right balances (~1088.78 each):
+# Keys talk to Bybit and see the right balances (~900.00 each):
 python3 - <<'PY'
 import ccxt
 from dotenv import dotenv_values
@@ -124,7 +125,7 @@ for tag, k, s in (("MAIN", env.get('API_KEY'), env.get('API_SECRET')),
 PY
 ```
 
-Expected: MAIN ≈ 1088.78, SUB ≈ 1088.78. `AuthenticationError` = wrong
+Expected: MAIN ≈ 900.00, SUB ≈ 900.00. `AuthenticationError` = wrong
 key/secret or missing IP whitelist — fix before continuing.
 
 ```bash
@@ -143,7 +144,7 @@ docker compose -f docker-compose.bidir4h-live.yml logs -f --tail=20
 
 Within a minute each bot logs its config line (`starting bot mode=live …`)
 and the Telegram panel (`rofl4hL-tg`) answers with the button menu — press
-**Stats**: 16 legs, booked equity ≈ 2,177.56, real equity per account shown.
+**Stats**: 16 legs, booked equity ≈ 1,800.00, real equity per account shown.
 
 **Week-1 checklist (L1, from ROADMAP Phase 6)** — all of these observed:
 
@@ -156,8 +157,13 @@ and the Telegram panel (`rofl4hL-tg`) answers with the button menu — press
       reconcile complaints (the two-account isolation working)
 - [ ] one deliberate restart (`docker compose … restart btc-t`) while an
       order rests — the pending survives and resolves
-- [ ] `min-notional`/`skipping order` lines rare (only on the smallest
-      risk-scaled entries)
+- [ ] `min-notional`/`skipping order` lines rare on the 7 non-BTC symbols.
+      **BTC is the known exception at $1,800**: its 0.001 lot (~$64) sits
+      near the risk-scaled size, so BTC trades slightly under-sized in
+      normal vol and skips in high vol. **Log its skip rate** — if BTC
+      misses most entries during L1, that is the signal to either fund the
+      BTC legs specifically or run the book ex-BTC (a sizing decision, not
+      a strategy change).
 
 Fallback flags (documented in the compose): if Bybit rejects an order type
 on some symbol, set `TP_LIMIT_ORDERS=0` and/or `ENTRY_LIMIT_ORDERS=0` in
@@ -185,7 +191,7 @@ program (ROADMAP Phase 6).
 
 | Trigger | Action |
 |---|---|
-| Book equity −8% from deploy (≈ −$175) at unit weights | halt new entries (`down`), full review before restart |
+| Book equity −8% from deploy (≈ −$144 on $1,800) at unit weights | halt new entries (`down`), full review before restart |
 | A bot logs `HALTED` (side conflict / extra size / untracked position) | it already stopped touching the exchange; reconcile that symbol on Bybit manually, then restart the service |
 | `pending entry status unknown >2 bars` Telegram alert | check the order on Bybit; entries on that leg are blocked until it resolves |
 | PULL legs' trailing-3-month Sharpe < 0 | demote to BLEND75 or triple-only (pre-registered fallback; ask for the reweighted compose) |
@@ -198,10 +204,10 @@ never run a second live portfolio next to this one.
 ## 8. L2 → L3: the dial
 
 After **L1 (≥2 weeks) + L2 (2–4 weeks)** are green and measured costs match
-the model: the first dial is **15% vol** — multiply both equity lines in
-`.env` by ~2.1 (`BTC4H_LIVE_EQUITY=630`, `LEG4H_LIVE_EQUITY=237`) **only if
-the wallet actually holds that much**, or keep the deposit and accept that
-the dial is really a leverage decision (the bot sizes off STARTING_EQUITY).
+the model: the first dial is **15% vol** — multiply the single equity line in
+`.env` by ~2.1 (`LEG4H_LIVE_EQUITY=236.25`) **only if the wallet actually
+holds that much**, or keep the deposit and accept that the dial is really a
+leverage decision (the bot sizes off STARTING_EQUITY).
 Honest L3 expectations: ~15–22%/y, dMDD ~−9%, worst day ~−3%. The 25% dial
 (x3.5, ~38%/y, −15% dMDD) is a separate decision after a full quarter of
 live record matching the model. Archive state before any resize

@@ -141,7 +141,8 @@ Fees were 73% of gross on 1h and are still the largest cost line on 4h.
 - [x] Assembly v2 with the promoted trend book (2026-07-06): the deployable
       BLEND50_CONF book runs at ~7% ann vol unweighted → @25% vol is only
       x3.5 gross: 37.9% CAGR / Sh 1.48 / dMDD −15.1% / worst mo −5.8% /
-      OOS 1.49 (deploy_report.py at the real $2,177.56; assemble_v2's own
+      OOS 1.49 (deploy_report.py; percentages are deposit-invariant, run at
+      the then-current deposit; assemble_v2's own
       x3.6 run was 37.4%/−13.4%). @50% ≈ x6.9, 78.8% CAGR, dMDD −28.9% (vs the old
       sleeve-combo needing x14.4 for similar CAGR). 3-sleeve v2 info-only:
       @25% 42.5% CAGR / Sh 1.50 / OOS 1.91 (assemble_v2.py)
@@ -170,8 +171,8 @@ Gate status at program start:
 ### supersedes the paper-first P1–P4 sequence)
 
 Rationale: at UNIT weights the book's long-history month-end MDD is −6.0%
-(daily common-window dMDD −4.5%), worst month −1.7% (≈$131 / ≈$37 on the real
-$2,177.56) — a price worth paying for real fills, which
+(daily common-window dMDD −4.5%), worst month −1.7% (≈$108 / ≈$31 on the
+current $1,800) — a price worth paying for real fills, which
 paper mode cannot produce (it simulates them). What live-first does NOT do
 is shorten the calendar: the weeks still pass before any vol dial.
 
@@ -179,17 +180,21 @@ Execution readiness (done before L1): maker entries (ENTRY_LIMIT_ORDERS,
 post-only at signal close, one-bar rest, partials closed not adopted,
 fill-bar TP suppressed — test_maker_entries.py, 9 cases) + TP limit orders
 (TP_LIMIT_ORDERS) + CONF sizing, all wired in the live compose. Splits:
-BTC legs $300.02 (0.001-lot ≈ $64 granularity), other legs $112.68.
+all 16 legs EQUAL at $112.50 ($1,800 / 16; $900 per account). Equal weights
+match the validated book — the earlier BTC-premium slice would be ~33% of
+the book at this deposit. Known friction: BTC's 0.001 lot (≈$64) sits near
+the risk-scaled size → under-sized in normal vol, skips in high vol (L1
+measures the skip rate).
 
 - [ ] **L0 — Account isolation (one-time, before L1)**: the -t and -p legs
       trade the SAME symbols; on one account they would net against each
       other and trip every reconcile guard (Pattern A). Create a Bybit
-      SUB-ACCOUNT for the pullback book, transfer **$1,088.78**
-      ($300.02 + 7×$112.68; the real deposit is $2,177.56 total), cut an
+      SUB-ACCOUNT for the pullback book, transfer **$900.00**
+      (8 `-p` legs × $112.50; the deposit is $1,800.00 total), cut an
       IP-whitelisted trade-only key, export PULL_API_KEY/PULL_API_SECRET.
       tg-control reads both accounts (API_KEY2 = sub key) and aggregates
       equity/positions in one panel. Full runbook: deploy/LIVE.md.
-- [ ] **L1 — Live shakedown (≥2 weeks, full $2,177.56 at UNIT weights)**:
+- [ ] **L1 — Live shakedown (≥2 weeks, full $1,800.00 at UNIT weights)**:
       week-1 checklist — post-only entries accepted (postonly-reject rate
       logged), first maker entry fill, first TP-limit fill, Partial/Limit
       attach accepted on all 8 symbols, reduce-only closes, sl-external
@@ -211,7 +216,7 @@ BTC legs $300.02 (0.001-lot ≈ $64 granularity), other legs $112.68.
 ### Standing kill / demotion criteria (pre-registered NOW, not on the day)
 
 - Book-level: at UNIT weights (L1/L2) a drawdown from deploy exceeding −8%
-  (≈$175, ~1.3× the −6% long-history MDD) → halt new entries, full review. At the 15%
+  (≈$144 on $1,800, ~1.3× the −6% long-history MDD) → halt new entries, full review. At the 15%
   dial (L3) the halt line is −15%.
 - PULL leg: if its live+paper Sharpe over the trailing 3 months is < 0 →
   demote to BLEND75 (pre-registered fallback) or triple-only; the leg's
@@ -337,4 +342,4 @@ Next steps (nothing touches capital before these):
 | 2026-07-05 | **MAJORS8 / RSCD3+VT** (ex-ante liquidity top-8) | 20.0% | 1.42 | −8.0% | IS 1.38 → OOS 1.41 | **trend-sleeve BASELINE** |
 | 2026-07-05 | **3-SLEEVE PORTFOLIO** (trend + TSMOM-90 + carry, inverse-vol) | vol-dial | **1.55** | mo −0.8% @ unit wts | IS 1.36 → **OOS 2.01**, thirds +1.54/+1.38/+1.82 | **PORTFOLIO TARGET — needs carry/TSMOM execution engineering + paper** |
 | 2026-07-06 | **TRIPLE+PULL BLEND50 + CONF sizing** (Phase-4 promotion) | 10.5% @ unit wts (vol-dial) | **1.47** | −4.8% | PULL G3 98th pct; IS 1.53 → OOS 1.43; thirds +2.40/+0.79/+1.46 | superseded by +TP-limit below |
-| 2026-07-06 | **BLEND50_CONF + TP-as-limit @ 25% vol (x3.5)** — deploy_report.py at $2,177.56 (origin assembly v2), daily granularity | **37.9%** | **1.48** | dMDD **−15.1%**, worst mo −5.8% | IS 1.44 → OOS 1.49 | **DEPLOYED-TO-PAPER CONFIG** (compose = 8 names × 2 legs + CONF; note paper runs UNlevered unit weights — the dial is a sizing decision, not bot logic) |
+| 2026-07-06 | **BLEND50_CONF + TP-as-limit @ 25% vol (x3.5)** — deploy_report.py (origin assembly v2), daily granularity | **37.9%** | **1.48** | dMDD **−15.1%**, worst mo −5.8% | IS 1.44 → OOS 1.49 | **DEPLOYED-TO-PAPER CONFIG** (compose = 8 names × 2 legs + CONF; note paper runs UNlevered unit weights — the dial is a sizing decision, not bot logic) |

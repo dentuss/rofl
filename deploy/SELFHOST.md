@@ -104,7 +104,7 @@ cd ~/rofl && python3 -m venv .venv && ./.venv/bin/pip install -r requirements.tx
 # FIRST RUN ONLY — preserve the anchor dates already stamped during
 # research (state/ does not travel through git; without these envs the
 # forward record would restart from today):
-SLEEVES_ANCHOR=2026-07-06 ./.venv/bin/python sleeves_paper.py
+SLEEVES_ANCHOR=2026-07-05 ./.venv/bin/python sleeves_paper.py
 XS_ANCHOR=2026-07-09     ./.venv/bin/python xs_paper.py
 
 crontab -e    # add (00:10 UTC, after the daily close):

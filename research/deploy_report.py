@@ -6,9 +6,11 @@ maker entries, TP-as-limit, real funding. Daily granularity.
 
 Prints: the UNIT-WEIGHTS row (what L1/L2 actually runs — no vol dial), the
 dial ladder for L3 reference, and the unit-weights month grid at the real
-deposit (TOTAL_EQUITY env, default 2177.56).
+deposit (TOTAL_EQUITY env, default 1800.00). All percentages are
+deposit-invariant; only the final-$ column scales with the deposit.
 
-Run:  PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe research/deploy_report.py
+Run:  PYTHONIOENCODING=utf-8 ./.venv/bin/python research/deploy_report.py
+      (Windows: ./.venv/Scripts/python.exe)
 """
 from __future__ import annotations
 
@@ -34,7 +36,7 @@ from research.vol_target import vt_mult
 
 MAJORS8 = [f"{b}-USDT" for b in
            ["BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "LINK", "AVAX"]]
-TOTAL = float(_os.environ.get("TOTAL_EQUITY", 2177.56))
+TOTAL = float(_os.environ.get("TOTAL_EQUITY", 1800.00))
 DAYS = int(_os.environ.get("DAYS", 2000))
 COMMON_START = pd.Timestamp("2023-08-17", tz="UTC")
 WARMUP_D = 365
@@ -136,9 +138,9 @@ def main():
         yr = float((1 + grp / 100).prod() - 1) * 100
         line += f"{yr:>9.1f}"
         print(line)
-    print(f"\n  legs: -t triple_bidir tp6, -p pullback 40/60 recross; splits "
-          f"BTC ${300.02:.2f}/leg, others ${112.68:.2f}/leg (16 legs = "
-          f"${2*300.02 + 14*112.68:.2f})")
+    print(f"\n  legs: -t triple_bidir tp6, -p pullback 40/60 recross; "
+          f"16 legs EQUAL at ${TOTAL / 16:.2f} (= ${TOTAL:,.2f}), "
+          f"${TOTAL / 2:,.2f} per account")
 
 
 if __name__ == "__main__":

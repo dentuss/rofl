@@ -1,43 +1,48 @@
 # 4h LIVE portfolio — the promoted BLEND50_CONF trend book, REAL MONEY.
 #
 # LIVE-FIRST program (user decision 2026-07-06; replaces the paper-first
-# track): full $2,177.56 at UNIT WEIGHTS — backtest dMDD -6.0% / worst month
-# -1.7% at this sizing, so the shakedown risks ~$140 worst-path while
-# gathering REAL fills. See research/ROADMAP.md "Phase 6" for the L1/L2/L3
-# stages and the pre-registered kill criteria (book -8% from start halts).
-# The vol dial (x2.1+) comes ONLY after L1+L2 are green — sizing anchored on
-# full-history Sharpe ~1.2, not the post-2023 1.5.
+# track): the full account at UNIT WEIGHTS — backtest dMDD -4.5% daily /
+# -6.0% long-history month-end, worst month -1.7%, so the shakedown risks
+# ~$110 worst-path while gathering REAL fills. See research/ROADMAP.md
+# "Phase 6" for the L1/L2/L3 stages and the pre-registered kill criteria
+# (book -8% from start halts = ~$144 at this size). The vol dial (x2.1+)
+# comes ONLY after L1+L2 are green — sizing anchored on full-history
+# Sharpe ~1.2, not the post-2023 1.5.
 #
 # Book: MAJORS8 x {triple_bidir tp6, pullback_in_trend} at 50/50 capital,
 # full adopted overlay stack + REGIME_CONF_SIZING + TP_LIMIT_ORDERS +
 # ENTRY_LIMIT_ORDERS (post-only maker entries — the engine's adopted cost
 # model; unit-tested in test_maker_entries.py).
 #
-# Splits for the REAL deposit of $2,177.56: BTC legs $300.02 each, the
-# other 14 legs $112.68 each (2x300.02 + 14x112.68 = $2,177.56 exactly).
-# BTC's 0.001 lot (~$64 notional) would coarsely round or skip risk-scaled
-# entries at an equal split; the bigger BTC slice keeps its sizing honest.
+# SPLITS for the current deposit of $1,800.00 (2026-07-30): all 16 legs
+# EQUAL at $112.50 (16 x 112.50 = 1800.00 exactly), $900.00 per account.
+# Equal weights are what the backtest validated — at this deposit an
+# ex-BTC premium slice would make BTC ~33% of the book, an unvalidated
+# concentration bet. Known friction instead: BTC's 0.001 lot (~$64
+# notional) sits near the risk-scaled size, so BTC trades slightly
+# under-sized in normal vol and SKIPS in high vol (logged as min-notional
+# skips — watch the rate during L1; that is data, not a bug).
 #
 # TWO ACCOUNTS — REQUIRED, NOT OPTIONAL. The -t and -p legs trade the SAME
 # symbols; two bots on one account would NET against each other (a pullback
 # short would reduce the triple long) and trip every reconcile guard
 # (Pattern A). Before L1:
 #   1. create a Bybit SUB-ACCOUNT for the pullback book
-#   2. transfer the p-book capital to it ($300.02 + 7x$112.68 = $1,088.78)
+#   2. transfer the p-book capital to it (8 x $112.50 = $900.00)
 #   3. cut an IP-whitelisted, trade-only key for it
-#   4. export PULL_API_KEY / PULL_API_SECRET on the EC2 box
+#   4. export PULL_API_KEY / PULL_API_SECRET on the live box
 # The -t legs use API_KEY/API_SECRET (main), the -p legs use PULL_API_KEY/
 # PULL_API_SECRET (sub). tg-control reads both (API_KEY2 = the sub key).
 #
-# Ops rules (see memory/FINDINGS):
-#   - trading key lives ONLY on the EC2 box, IP-whitelisted, trade-only
-#     permissions (NO withdrawal); keys via env (API_KEY/API_SECRET), never
-#     in this file
+# Ops rules (see CLAUDE.md + research/FINDINGS.md):
+#   - trading key lives ONLY on the single IP-whitelisted live box,
+#     trade-only permissions (NO withdrawal); keys via env
+#     (API_KEY/API_SECRET), never in this file
 #   - NEVER run this alongside any other LIVE portfolio (the paper stack
 #     rofl4h-* is fine — it holds no keys and touches nothing)
 #   - all closes are reduce-only (bot enforces; do not override)
 #
-# Run (on the EC2 box, after the green light):
+# Run (on the live box, after the green light):
 #   docker compose -f docker-compose.bidir4h-live.yml up -d --build
 #   docker compose -f docker-compose.bidir4h-live.yml logs -f
 #   docker compose -f docker-compose.bidir4h-live.yml down
@@ -98,9 +103,9 @@ x-pull: &pull-env
   API_KEY: ${PULL_API_KEY:-}
   API_SECRET: ${PULL_API_SECRET:-}
 
-# Per-service capital (L1 = full book at unit weights): BTC legs
-# BTC4H_LIVE_EQUITY (default 300.02), all other legs LEG4H_LIVE_EQUITY
-# (default 112.68). The vol dial in L3 scales these, nothing else.
+# Per-service capital (L1 = full book at unit weights): every leg gets
+# LEG4H_LIVE_EQUITY (default 112.50 = $1,800 / 16). The vol dial in L3
+# scales this single number, nothing else.
 services:
   btc-t:
     <<: *bot-defaults
@@ -108,7 +113,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: BTC/USDT
-      STARTING_EQUITY: ${BTC4H_LIVE_EQUITY:-300.02}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: [live_btc_t_state:/app/state, live_btc_t_logs:/app/logs, live4h_cache:/app/.cache]
   btc-p:
     <<: *bot-defaults
@@ -116,7 +121,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: BTC/USDT
-      STARTING_EQUITY: ${BTC4H_LIVE_EQUITY:-300.02}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: [live_btc_p_state:/app/state, live_btc_p_logs:/app/logs, live4h_cache:/app/.cache]
 
   eth-t:
@@ -125,7 +130,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: ETH/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.68}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: [live_eth_t_state:/app/state, live_eth_t_logs:/app/logs, live4h_cache:/app/.cache]
   eth-p:
     <<: *bot-defaults
@@ -133,7 +138,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: ETH/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.68}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: [live_eth_p_state:/app/state, live_eth_p_logs:/app/logs, live4h_cache:/app/.cache]
 
   sol-t:
@@ -142,7 +147,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: SOL/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.68}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: [live_sol_t_state:/app/state, live_sol_t_logs:/app/logs, live4h_cache:/app/.cache]
   sol-p:
     <<: *bot-defaults
@@ -150,7 +155,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: SOL/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.68}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: [live_sol_p_state:/app/state, live_sol_p_logs:/app/logs, live4h_cache:/app/.cache]
 
   xrp-t:
@@ -159,7 +164,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: XRP/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.68}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: [live_xrp_t_state:/app/state, live_xrp_t_logs:/app/logs, live4h_cache:/app/.cache]
   xrp-p:
     <<: *bot-defaults
@@ -167,7 +172,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: XRP/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.68}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: [live_xrp_p_state:/app/state, live_xrp_p_logs:/app/logs, live4h_cache:/app/.cache]
 
   doge-t:
@@ -176,7 +181,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: DOGE/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.68}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: [live_doge_t_state:/app/state, live_doge_t_logs:/app/logs, live4h_cache:/app/.cache]
   doge-p:
     <<: *bot-defaults
@@ -184,7 +189,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: DOGE/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.68}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: [live_doge_p_state:/app/state, live_doge_p_logs:/app/logs, live4h_cache:/app/.cache]
 
   ada-t:
@@ -193,7 +198,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: ADA/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.68}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: [live_ada_t_state:/app/state, live_ada_t_logs:/app/logs, live4h_cache:/app/.cache]
   ada-p:
     <<: *bot-defaults
@@ -201,7 +206,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: ADA/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.68}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: [live_ada_p_state:/app/state, live_ada_p_logs:/app/logs, live4h_cache:/app/.cache]
 
   link-t:
@@ -210,7 +215,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: LINK/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.68}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: [live_link_t_state:/app/state, live_link_t_logs:/app/logs, live4h_cache:/app/.cache]
   link-p:
     <<: *bot-defaults
@@ -218,7 +223,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: LINK/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.68}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: [live_link_p_state:/app/state, live_link_p_logs:/app/logs, live4h_cache:/app/.cache]
 
   avax-t:
@@ -227,7 +232,7 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: AVAX/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.68}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: [live_avax_t_state:/app/state, live_avax_t_logs:/app/logs, live4h_cache:/app/.cache]
   avax-p:
     <<: *bot-defaults
@@ -235,7 +240,7 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: AVAX/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.68}
+      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: [live_avax_p_state:/app/state, live_avax_p_logs:/app/logs, live4h_cache:/app/.cache]
 
   # Telegram button panel (Stats / Positions / Today / Health / Reconcile).

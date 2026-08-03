@@ -4,6 +4,10 @@ Systematic crypto-perp trading program on Bybit USDT-linear. This file is the
 constitution; `SESSIONHANDOFF.md` is the current status; `research/FINDINGS.md`
 is the evidence ledger. Read all three before acting.
 
+**Current capital: $1,800.00 USDT** (2026-07-30). Any number in a doc that
+implies a different deposit is stale — flag it. Percentages in the research
+tables are deposit-invariant; only dollar figures move.
+
 ## The goal
 
 Build the highest **honest** risk-adjusted return this book can sustain, and
@@ -56,10 +60,15 @@ engine with full costs or it does not exist.
 
 ## How to work here
 
-- Local env: Python 3.14 `.venv` (sklearn/pandas3). Run research via
-  `PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe research/<x>.py`; heavy
-  runs go to background Bash with `tee` to the scratchpad. Tests are
-  plain-assert `__main__` runners (no pytest).
+- **Local env (LINUX since 2026-07-30)**: `python3 -m venv .venv &&
+  ./.venv/bin/pip install -r requirements.txt`. Run research via
+  `PYTHONIOENCODING=utf-8 ./.venv/bin/python research/<x>.py`; heavy runs go
+  to background Bash with `tee` to the scratchpad. Tests are plain-assert
+  `__main__` runners (no pytest) — `./.venv/bin/python test_<x>.py`.
+  ⚠ ~50 research scripts still carry the old Windows `Run:` line in their
+  docstrings (`./.venv/Scripts/python.exe`) — that is cosmetic; on Linux
+  substitute `./.venv/bin/python`. Only `collector.py` has real
+  platform-specific code, and it is properly `sys.platform` guarded.
 - Commit to `main` (feat branches + PRs are fine); the human merges. End
   commit bodies with the Co-Authored-By trailer. Push when a unit of work
   is validated + documented (FINDINGS/ROADMAP updated).

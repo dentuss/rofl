@@ -90,7 +90,7 @@ sudo swapon /swapfile && echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fs
 
 On Bybit, edit **both** API keys (main = triple book, sub = pullback book)
 and change the IP allowlist to the **new reserved Oracle IP**. Confirm with
-the preflight from `deploy/LIVE.md` §4 (both must return their ~$1,088.78
+the preflight from `deploy/LIVE.md` §4 (both must return their ~$900.00
 balances from the new box).
 
 ## 5. Bring it up

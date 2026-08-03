@@ -1,0 +1,15 @@
+# Normalize line endings so the repo is byte-identical across Windows/Linux.
+# Critical for deploy/setup.sh: a CRLF shell script fails on Linux with
+# "bad interpreter: /usr/bin/env bash^M". The object store is already LF —
+# this guarantees it stays that way regardless of a contributor's
+# core.autocrlf setting.
+* text=auto eol=lf
+
+# Shell scripts must ALWAYS be LF (they are executed on Linux boxes).
+*.sh text eol=lf
+
+# Binary — never touch.
+*.parquet binary
+*.png binary
+*.jpg binary
+*.gz binary
