@@ -35,10 +35,30 @@ didn't open. Box loss is a restart event, never an unprotected position.
 
 | VM | shape | boot vol | runs | holds keys |
 |---|---|---|---|---|
-| `rofl-collector` | **1 OCPU / 2 GB** | 50 GB | tick collector | **no** |
-| `rofl-trading` | **1 OCPU / 10 GB** | 100 GB | live book + tg-control | yes |
+| `rofl-collector` | **1 OCPU / 2 GB** | **50 GB boot** | tick collector | **no** |
+| `rofl-trading` | **1 OCPU / 10 GB** | **50 GB boot** | live book + tg-control | yes |
 
-Total 2 OCPU / 12 GB / 150 GB — inside the free tier.
+Total 2 OCPU / 12 GB / **100 GB** — half the free block allowance, leaving
+100 GB of headroom.
+
+**Storage: boot volumes only — attach no block volumes.** In Oracle a boot
+volume *is* block storage, drawn from the same pool, and Always Free covers
+**200 GB total (boot + block combined)**. Two 50 GB boots use half of it.
+
+> ⚠ **Oracle's Cost Estimator prices at LIST and ignores Always Free**, so it
+> will quote ~$4.25/mo (≈€3.95) for a 100 GB Balanced boot volume. That is not
+> a bill — but do not size to it either. Earlier revisions of this file said
+> 100 GB per box; two of those consume the *entire* 200 GB allowance with zero
+> headroom for a backup or a resize, which is one drift away from billing.
+> Trust the **"Always Free Eligible"** badge on the create page, and your first
+> actual invoice — not the estimator.
+
+Measured need (2026-08-05), which is why 50 GB is generous:
+
+| box | contents | total |
+|---|---|---|
+| trading | OS 8 + swap 4 + images 2 + bar-cache 1 + capped logs 0.8 | **15.8 GB** |
+| collector | OS 8 + swap 2 + images 2 + ticks 7.7/yr | **19.7 GB yr 1 → 50.5 GB yr 5** |
 
 **Why split rather than run one box.** The collector's entire value is
 *continuity*: tick history cannot be backfilled, so every restart, rebuild or
@@ -83,6 +103,8 @@ deterministic `crc32(symbol) % FETCH_STAGGER_SECS` offset that spreads them.
 3. Compute → Create Instance, twice, per the table in §1:
    - Image: **Canonical Ubuntu 24.04** (Minimal is fine)
    - Shape: **VM.Standard.A1.Flex**
+   - Boot volume: **50 GB** (do NOT add a block volume)
+   - Confirm the **"Always Free Eligible"** badge is shown
    - SSH: paste your public key
 4. **Reserved public IP for `rofl-trading` only** (Networking → Reserved
    Public IPs → attach to the VNIC). The Bybit keys are IP-whitelisted so that
