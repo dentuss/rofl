@@ -70,20 +70,34 @@ sudo systemctl enable docker >/dev/null 2>&1 || true
 if [[ ! -f .env ]]; then
     warn "no .env — creating a TEMPLATE with empty values (fill it in by hand)"
     cat > .env <<'TEMPLATE'
-# Trade-only, IP-whitelisted keys. NO withdrawal permission. chmod 600.
-# main account = the 8 triple (-t) legs
+# rofl trading box — REQUIRED. chmod 600. Never committed (gitignored).
+# Keys must be TRADE-ONLY (no withdrawal, no transfer) and IP-whitelisted to
+# THIS box's reserved public IP.
+
+# --- REQUIRED: main account -> the 8 triple (-t) legs
 API_KEY=
 API_SECRET=
-# sub-account roflbot_pullback = the 8 pullback (-p) legs
+
+# --- REQUIRED: sub-account roflbot_pullback -> the 8 pullback (-p) legs.
+# tg-control also reads these as its second account automatically (the compose
+# maps API_KEY2=${PULL_API_KEY}), so there is nothing else to set for it.
 PULL_API_KEY=
 PULL_API_SECRET=
-# tg-control reads BOTH accounts (API_KEY2 = the sub key)
-API_KEY2=
-API_SECRET2=
+
+# --- REQUIRED before L1: per-leg equity, = real per-account balance / 8.
+# 112.50 assumed $900/$900; the actual split was 797.65/999.49 (ROADMAP L0.5).
+# Do NOT start with a stale value — it silently mis-sizes every position.
+LEG4H_LIVE_EQUITY=
+
+# --- OPTIONAL: Telegram control panel. Blank = notifier disabled, bots
+# unaffected (they log "telegram notifier disabled" and trade normally).
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
-# Per-leg equity. RE-DERIVE FROM REAL BALANCES — see ROADMAP L0.5.
-LEG4H_LIVE_EQUITY=112.50
+
+# --- OPTIONAL: only override if you know why. Defaults shown.
+# EXCHANGE=bybit
+# POLL_SECONDS=30
+# ROFL_DATA=./data
 TEMPLATE
     chmod 600 .env
 else
@@ -101,6 +115,14 @@ MISSING=0
 for V in API_KEY API_SECRET PULL_API_KEY PULL_API_SECRET; do
     grep -qE "^${V}=.+" .env || { warn "$V is empty in .env"; MISSING=1; }
 done
+# Blank LEG4H_LIVE_EQUITY is NOT harmless: the compose falls back to
+# ${LEG4H_LIVE_EQUITY:-112.50}, the stale $900/$900 figure. That would size
+# every leg off a split that no longer exists, silently.
+if ! grep -qE "^LEG4H_LIVE_EQUITY=[0-9]+(\.[0-9]+)?$" .env; then
+    warn "LEG4H_LIVE_EQUITY unset/blank — the compose would fall back to 112.50,"
+    warn "  which assumes the OLD \$900/\$900 split. Derive it in L0.5 first."
+    MISSING=1
+fi
 
 cat <<EOF
 

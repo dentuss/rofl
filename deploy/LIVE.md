@@ -105,15 +105,23 @@ PULL_API_SECRET=your_SUB_secret
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
 
-# --- sizing (default already matches the $1,800.00 deposit) --------------
-# LEG4H_LIVE_EQUITY=112.50      # all 16 legs; 16 x 112.50 = 1800.00
+# --- sizing: REQUIRED. real per-account balance / 8. --------------------
+# Do NOT leave this blank. The compose falls back to ${LEG4H_LIVE_EQUITY:-112.50},
+# which assumed a $900/$900 split; the ACTUAL split is 797.65/999.49
+# (ROADMAP L0.5), so 112.50 now mis-sizes BOTH books silently.
+LEG4H_LIVE_EQUITY=
 EOF
 chmod 600 .env
 ```
 
 Compose reads `.env` automatically from the repo directory. The per-leg
-split is a single compose default — uncomment that one line to override it
-(a deposit change or an L3 dial-up is just this number).
+split is a single number — a deposit change or an L3 dial-up is just this one
+value. `deploy/init-trading.sh` writes this same template if `.env` is absent
+and refuses to call the box ready until the four keys AND the equity are set.
+
+**Do not add `API_KEY2` / `API_SECRET2`.** tg-control reads the sub-account
+through the compose mapping `API_KEY2: ${PULL_API_KEY}` — setting them in
+`.env` does nothing.
 
 ## 4. Preflight (do not skip)
 
