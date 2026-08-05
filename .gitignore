@@ -13,6 +13,8 @@ archives/
 *.pem
 *.ppk
 .idea/
+secrets/
+screenshots/
 
 # Local Claude Code MCP config (references secrets via env vars; keep out of the prod repo)
 .mcp.json

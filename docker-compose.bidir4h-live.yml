@@ -121,7 +121,7 @@ services:
       <<: *triple-env
       SYMBOL: BTC/USDT
       STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
-    volumes: [${ROFL_DATA:-./data}/live/btc-t/state:/app/state, ${ROFL_DATA:-./data}/live/btc-t/logs:/app/logs, live4h_cache:/app/.cache]
+    volumes: ["${ROFL_DATA:-./data}/live/btc-t/state:/app/state", "${ROFL_DATA:-./data}/live/btc-t/logs:/app/logs", "live4h_cache:/app/.cache"]
   btc-p:
     <<: *bot-defaults
     container_name: rofl4hL-btc-p
@@ -129,7 +129,7 @@ services:
       <<: *pull-env
       SYMBOL: BTC/USDT
       STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
-    volumes: [${ROFL_DATA:-./data}/live/btc-p/state:/app/state, ${ROFL_DATA:-./data}/live/btc-p/logs:/app/logs, live4h_cache:/app/.cache]
+    volumes: ["${ROFL_DATA:-./data}/live/btc-p/state:/app/state", "${ROFL_DATA:-./data}/live/btc-p/logs:/app/logs", "live4h_cache:/app/.cache"]
 
   eth-t:
     <<: *bot-defaults
@@ -138,7 +138,7 @@ services:
       <<: *triple-env
       SYMBOL: ETH/USDT
       STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
-    volumes: [${ROFL_DATA:-./data}/live/eth-t/state:/app/state, ${ROFL_DATA:-./data}/live/eth-t/logs:/app/logs, live4h_cache:/app/.cache]
+    volumes: ["${ROFL_DATA:-./data}/live/eth-t/state:/app/state", "${ROFL_DATA:-./data}/live/eth-t/logs:/app/logs", "live4h_cache:/app/.cache"]
   eth-p:
     <<: *bot-defaults
     container_name: rofl4hL-eth-p
@@ -146,7 +146,7 @@ services:
       <<: *pull-env
       SYMBOL: ETH/USDT
       STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
-    volumes: [${ROFL_DATA:-./data}/live/eth-p/state:/app/state, ${ROFL_DATA:-./data}/live/eth-p/logs:/app/logs, live4h_cache:/app/.cache]
+    volumes: ["${ROFL_DATA:-./data}/live/eth-p/state:/app/state", "${ROFL_DATA:-./data}/live/eth-p/logs:/app/logs", "live4h_cache:/app/.cache"]
 
   sol-t:
     <<: *bot-defaults
@@ -155,7 +155,7 @@ services:
       <<: *triple-env
       SYMBOL: SOL/USDT
       STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
-    volumes: [${ROFL_DATA:-./data}/live/sol-t/state:/app/state, ${ROFL_DATA:-./data}/live/sol-t/logs:/app/logs, live4h_cache:/app/.cache]
+    volumes: ["${ROFL_DATA:-./data}/live/sol-t/state:/app/state", "${ROFL_DATA:-./data}/live/sol-t/logs:/app/logs", "live4h_cache:/app/.cache"]
   sol-p:
     <<: *bot-defaults
     container_name: rofl4hL-sol-p
@@ -163,7 +163,7 @@ services:
       <<: *pull-env
       SYMBOL: SOL/USDT
       STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
-    volumes: [${ROFL_DATA:-./data}/live/sol-p/state:/app/state, ${ROFL_DATA:-./data}/live/sol-p/logs:/app/logs, live4h_cache:/app/.cache]
+    volumes: ["${ROFL_DATA:-./data}/live/sol-p/state:/app/state", "${ROFL_DATA:-./data}/live/sol-p/logs:/app/logs", "live4h_cache:/app/.cache"]
 
   xrp-t:
     <<: *bot-defaults
@@ -172,7 +172,7 @@ services:
       <<: *triple-env
       SYMBOL: XRP/USDT
       STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
-    volumes: [${ROFL_DATA:-./data}/live/xrp-t/state:/app/state, ${ROFL_DATA:-./data}/live/xrp-t/logs:/app/logs, live4h_cache:/app/.cache]
+    volumes: ["${ROFL_DATA:-./data}/live/xrp-t/state:/app/state", "${ROFL_DATA:-./data}/live/xrp-t/logs:/app/logs", "live4h_cache:/app/.cache"]
   xrp-p:
     <<: *bot-defaults
     container_name: rofl4hL-xrp-p
@@ -180,7 +180,7 @@ services:
       <<: *pull-env
       SYMBOL: XRP/USDT
       STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
-    volumes: [${ROFL_DATA:-./data}/live/xrp-p/state:/app/state, ${ROFL_DATA:-./data}/live/xrp-p/logs:/app/logs, live4h_cache:/app/.cache]
+    volumes: ["${ROFL_DATA:-./data}/live/xrp-p/state:/app/state", "${ROFL_DATA:-./data}/live/xrp-p/logs:/app/logs", "live4h_cache:/app/.cache"]
 
   doge-t:
     <<: *bot-defaults
@@ -189,7 +189,7 @@ services:
       <<: *triple-env
       SYMBOL: DOGE/USDT
       STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
-    volumes: [${ROFL_DATA:-./data}/live/doge-t/state:/app/state, ${ROFL_DATA:-./data}/live/doge-t/logs:/app/logs, live4h_cache:/app/.cache]
+    volumes: ["${ROFL_DATA:-./data}/live/doge-t/state:/app/state", "${ROFL_DATA:-./data}/live/doge-t/logs:/app/logs", "live4h_cache:/app/.cache"]
   doge-p:
     <<: *bot-defaults
     container_name: rofl4hL-doge-p
@@ -197,7 +197,7 @@ services:
       <<: *pull-env
       SYMBOL: DOGE/USDT
       STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
-    volumes: [${ROFL_DATA:-./data}/live/doge-p/state:/app/state, ${ROFL_DATA:-./data}/live/doge-p/logs:/app/logs, live4h_cache:/app/.cache]
+    volumes: ["${ROFL_DATA:-./data}/live/doge-p/state:/app/state", "${ROFL_DATA:-./data}/live/doge-p/logs:/app/logs", "live4h_cache:/app/.cache"]
 
   ada-t:
     <<: *bot-defaults
@@ -206,7 +206,7 @@ services:
       <<: *triple-env
       SYMBOL: ADA/USDT
       STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
-    volumes: [${ROFL_DATA:-./data}/live/ada-t/state:/app/state, ${ROFL_DATA:-./data}/live/ada-t/logs:/app/logs, live4h_cache:/app/.cache]
+    volumes: ["${ROFL_DATA:-./data}/live/ada-t/state:/app/state", "${ROFL_DATA:-./data}/live/ada-t/logs:/app/logs", "live4h_cache:/app/.cache"]
   ada-p:
     <<: *bot-defaults
     container_name: rofl4hL-ada-p
@@ -214,7 +214,7 @@ services:
       <<: *pull-env
       SYMBOL: ADA/USDT
       STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
-    volumes: [${ROFL_DATA:-./data}/live/ada-p/state:/app/state, ${ROFL_DATA:-./data}/live/ada-p/logs:/app/logs, live4h_cache:/app/.cache]
+    volumes: ["${ROFL_DATA:-./data}/live/ada-p/state:/app/state", "${ROFL_DATA:-./data}/live/ada-p/logs:/app/logs", "live4h_cache:/app/.cache"]
 
   link-t:
     <<: *bot-defaults
@@ -223,7 +223,7 @@ services:
       <<: *triple-env
       SYMBOL: LINK/USDT
       STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
-    volumes: [${ROFL_DATA:-./data}/live/link-t/state:/app/state, ${ROFL_DATA:-./data}/live/link-t/logs:/app/logs, live4h_cache:/app/.cache]
+    volumes: ["${ROFL_DATA:-./data}/live/link-t/state:/app/state", "${ROFL_DATA:-./data}/live/link-t/logs:/app/logs", "live4h_cache:/app/.cache"]
   link-p:
     <<: *bot-defaults
     container_name: rofl4hL-link-p
@@ -231,7 +231,7 @@ services:
       <<: *pull-env
       SYMBOL: LINK/USDT
       STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
-    volumes: [${ROFL_DATA:-./data}/live/link-p/state:/app/state, ${ROFL_DATA:-./data}/live/link-p/logs:/app/logs, live4h_cache:/app/.cache]
+    volumes: ["${ROFL_DATA:-./data}/live/link-p/state:/app/state", "${ROFL_DATA:-./data}/live/link-p/logs:/app/logs", "live4h_cache:/app/.cache"]
 
   avax-t:
     <<: *bot-defaults
@@ -240,7 +240,7 @@ services:
       <<: *triple-env
       SYMBOL: AVAX/USDT
       STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
-    volumes: [${ROFL_DATA:-./data}/live/avax-t/state:/app/state, ${ROFL_DATA:-./data}/live/avax-t/logs:/app/logs, live4h_cache:/app/.cache]
+    volumes: ["${ROFL_DATA:-./data}/live/avax-t/state:/app/state", "${ROFL_DATA:-./data}/live/avax-t/logs:/app/logs", "live4h_cache:/app/.cache"]
   avax-p:
     <<: *bot-defaults
     container_name: rofl4hL-avax-p
@@ -248,7 +248,7 @@ services:
       <<: *pull-env
       SYMBOL: AVAX/USDT
       STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
-    volumes: [${ROFL_DATA:-./data}/live/avax-p/state:/app/state, ${ROFL_DATA:-./data}/live/avax-p/logs:/app/logs, live4h_cache:/app/.cache]
+    volumes: ["${ROFL_DATA:-./data}/live/avax-p/state:/app/state", "${ROFL_DATA:-./data}/live/avax-p/logs:/app/logs", "live4h_cache:/app/.cache"]
 
   # Telegram button panel (Stats / Positions / Today / Health / Reconcile).
   # READ-ONLY: state files mounted ro, only Bybit read endpoints called.
@@ -269,22 +269,22 @@ services:
       API_KEY2: ${PULL_API_KEY:-}
       API_SECRET2: ${PULL_API_SECRET:-}
     volumes:
-      - live_btc_t_state:/states/btc-t:ro
-      - live_btc_p_state:/states/btc-p:ro
-      - live_eth_t_state:/states/eth-t:ro
-      - live_eth_p_state:/states/eth-p:ro
-      - live_sol_t_state:/states/sol-t:ro
-      - live_sol_p_state:/states/sol-p:ro
-      - live_xrp_t_state:/states/xrp-t:ro
-      - live_xrp_p_state:/states/xrp-p:ro
-      - live_doge_t_state:/states/doge-t:ro
-      - live_doge_p_state:/states/doge-p:ro
-      - live_ada_t_state:/states/ada-t:ro
-      - live_ada_p_state:/states/ada-p:ro
-      - live_link_t_state:/states/link-t:ro
-      - live_link_p_state:/states/link-p:ro
-      - live_avax_t_state:/states/avax-t:ro
-      - live_avax_p_state:/states/avax-p:ro
+      - ${ROFL_DATA:-./data}/live/btc-t/state:/states/btc-t:ro
+      - ${ROFL_DATA:-./data}/live/btc-p/state:/states/btc-p:ro
+      - ${ROFL_DATA:-./data}/live/eth-t/state:/states/eth-t:ro
+      - ${ROFL_DATA:-./data}/live/eth-p/state:/states/eth-p:ro
+      - ${ROFL_DATA:-./data}/live/sol-t/state:/states/sol-t:ro
+      - ${ROFL_DATA:-./data}/live/sol-p/state:/states/sol-p:ro
+      - ${ROFL_DATA:-./data}/live/xrp-t/state:/states/xrp-t:ro
+      - ${ROFL_DATA:-./data}/live/xrp-p/state:/states/xrp-p:ro
+      - ${ROFL_DATA:-./data}/live/doge-t/state:/states/doge-t:ro
+      - ${ROFL_DATA:-./data}/live/doge-p/state:/states/doge-p:ro
+      - ${ROFL_DATA:-./data}/live/ada-t/state:/states/ada-t:ro
+      - ${ROFL_DATA:-./data}/live/ada-p/state:/states/ada-p:ro
+      - ${ROFL_DATA:-./data}/live/link-t/state:/states/link-t:ro
+      - ${ROFL_DATA:-./data}/live/link-p/state:/states/link-p:ro
+      - ${ROFL_DATA:-./data}/live/avax-t/state:/states/avax-t:ro
+      - ${ROFL_DATA:-./data}/live/avax-p/state:/states/avax-p:ro
     logging:
       driver: json-file
       options:
