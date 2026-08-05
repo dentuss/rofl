@@ -155,11 +155,57 @@ free -h                           # swap should stay ~empty
 **Back up the tick volume** — it lives on one instance and is the only
 irreplaceable asset here. Monthly is enough:
 ```bash
-docker run --rm -v rofl-collector_tick_data:/d -v $PWD:/out alpine \
-  tar czf /out/ticks-$(date -u +%F).tgz /d
+tar czf ticks-$(date -u +%F).tgz -C ~/rofl/data ticks
 ```
 
-## 7. Resuming after downtime
+## 7. Pulling data back for analysis
+
+Both boxes **bind-mount** their output to `<repo>/data` (the composes use
+`${ROFL_DATA:-./data}`), rather than writing into named Docker volumes. That
+one choice is what makes analysis painless: the remote and local trees are
+identical, so pulling is a plain incremental `rsync` — no `docker cp`, no
+staging copy, no doubling disk on a 50 GB box.
+
+```
+data/
+  ticks/YYYY-MM-DD/{trades_1s,liq,book_1s,ticker_1m}.csv[.gz]
+  live/<sym>-<leg>/state/{bot_state.json,heartbeat}
+  live/<sym>-<leg>/logs/{bot.log,events-YYYY-MM-DD.jsonl}
+```
+
+From the laptop:
+```bash
+deploy/pull-data.sh              # both boxes   (also: ticks | live)
+./.venv/bin/python research/data_health.py
+```
+
+`pull-data.sh` is **read-only on the remote** — it only reads, restarts
+nothing, and is safe to run against a live trading box mid-position. Add
+`rofl-collector` / `rofl-trading` aliases to `~/.ssh/config`, or set
+`COLLECTOR_HOST` / `TRADING_HOST`. Gzipped past days never change, so after
+the first pull rsync only moves today's file.
+
+Then in any research script:
+```python
+from core.datastore import load_ticks, live_blotter, load_states, summary
+liq = load_ticks("liq", start="2026-08-05", symbols=["ETH"])
+bl  = live_blotter()      # live fills in core.backtest.Trade shape
+```
+
+`live_blotter()` is deliberately shaped to match the engine's `Trade`
+dataclass field-for-field, so **ROADMAP L2's "reconcile live vs engine" is a
+DataFrame join** rather than an afternoon of eyeballing. `research/
+data_health.py` reports tick coverage vs expected, missing days, per-symbol
+gaps, leg heartbeats and PnL by exit reason — run it after every pull, before
+any study that consumes the data.
+
+The loaders tolerate ugly data by design (`test_datastore.py`, 8 cases):
+partial final lines from rsyncing a file mid-append, a day that rolled over
+during the pull, a leg that never traded, an exit whose entry predates the
+log. Missing data yields empty frames, never an exception — and **never a
+synthesised row.** A fake tick poisons every study built on it.
+
+## 8. Resuming after downtime
 
 On the first live `up`, each leg reconciles against Bybit automatically:
 position still open → resumes managing it (its attached SL/TP were live

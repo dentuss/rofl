@@ -27,12 +27,10 @@ services:
       DATA_DIR: /app/data
       # SYMBOLS: override to trim/extend; defaults to the 8 majors
     volumes:
-      - tick_data:/app/data
+      - ${ROFL_DATA:-./data}/ticks:/app/data
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "5"
 
-volumes:
-  tick_data:

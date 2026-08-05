@@ -19,3 +19,6 @@ archives/
 node_modules/
 package.json
 package-lock.json
+
+# Pulled box data (collector ticks + live state/logs) — see deploy/pull-data.sh
+data/

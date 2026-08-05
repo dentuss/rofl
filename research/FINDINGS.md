@@ -179,6 +179,45 @@ entries at 0.02%, real per-pair funding, 2 bps slip on taker legs).
 | **`bot.py` signal-flip parity claim is STALE** (2026-08-03) | bot.py:1046 documents a deliberate engine-vs-live divergence (backtest closes+reverses on an opposite signal; live holds through flips) justified as "**<1% of exits**, immaterial", measured on 5 pairs of **1h SOFT5-era** data — and the comment itself says "re-measure if exit logic ever changes". It has changed completely since (4h, tp6, maker entries, TP-as-limit, K=3 cooldown). Measured on the deployed book: **triple 54/1740 = 3.1%** of exits (meanR −0.22, medR −0.31, mean 71.5 bars held), pull 2/182 = 1.1%, combined **2.9% — ~3× the documented claim**. Materiality: ≈−12R of the ≈+271R net over the window (~4% of net profit) that the engine books and live does not. Small, but "immaterial" and "<1%" are both now factually wrong. NOT a bug and NOT a change — the divergence is deliberate and may well favour live; the ask is to update the comment with the measured number and make the choice deliberately rather than on a stale measurement. | timestop_4h.py |
 | **Conditioned sleeve variants — redesign round** (2026-07-06) | Diagnosis first: 2021 universe is THIN (median 13/23 names with data); funding dispersion has secularly COLLAPSED (median cross-sec std of 7d funding 43bp 2021 → 15bp 2023 → 7bp 2025), and corr(carry month, LAGGED dispersion) = **−0.27** — the "carry pays when dispersion is fat" hypothesis is REFUTED: fat dispersion was the 2021 funding mania that whipsaws a 7d rank (short-the-expensive names that keep mooning), while carry's actual profits came from the thin-dispersion 2024–25 era. corr(TSMOM month, \|BTC month\|) = **+0.25** — TSMOM earns in big-move months, so a calm/vol filter trims exactly the wrong months. All three pre-registered variants (lagged rolling-quantile gates, no fitted constants, early history defaults to TRADING so a gate can't hide the bleed) **FAIL the full-history gate** (need full Sh ≥ 0.5 AND pre-2023-08 ≥ 0.0): TSMOM_STRONG full +0.21 / pre −0.68; TSMOM_CALM +0.17 / −0.59; CARRY_GATED +0.26 / −0.40 (direction right but far from the bar, and it kills 2025: +1.8 → −0.2). Caveats: the 2021 "whipsaw" count (451 flips/name) is contaminated by missing-data NaN transitions — the honest 2021 signal is universe thinness, not measured churn; the harness's simplified common frame gives slightly different ref numbers than the sleeve scripts (carry pre −0.67 vs −0.34) but the same shape and verdict. **Conclusion: the pre-2023 bleed has no exploitable structure under honest conditioning. Sleeves remain prove-it-forward only; leverage stays BLOCKED; the trend book (MAJORS8, Sh 1.42) remains the only leverage-eligible component.** | sleeve_diagnosis.py |
 
+## ⚠ 2026-08-05 — `test_exec_parity` is RED, on a retired config, via a rolling window
+
+`test_exec_parity.py` now fails: **ADA-USDT, 180d of 1h data, K=3 — 16
+divergence regions, 1 UNEXPECTED.** It passed on 2026-08-03. Recorded rather
+than silenced, because a red G5 gate is exactly the thing this project must
+not learn to ignore.
+
+**Diagnosis — it is NOT a regression from the fee-booking fix.** A/B against
+`git show fac8f7b:bot.py` (the last commit before that change) reproduces the
+result *identically*: same 16 regions, same 1 UNEXPECTED, same 163/160 trade
+counts. Cause is the test's **rolling data window** — every section fetches
+`days=180` (1h) or `days=540` (4h) relative to *today*, so two days of new
+bars slid in and surfaced a fresh edge case.
+
+**The deployed book is unaffected.** Every 4h section is clean:
+
+| section | pairs | UNEXPECTED |
+|---|---|---|
+| 4h K=0, tp6 (honest-rebuild config) | 5 | **0** |
+| pullback 4h K=3 (BLEND50_CONF leg 2) | BTC/ETH/SOL | **0** |
+| 1h K=0 (retired) | 5 | 0 |
+| **1h K=3 (retired)** | ADA | **1** |
+
+The failing cell belongs to the 1h program that the same-bar artifact retired
+in 2026-07-05; nothing deployed runs 1h or that cooldown path.
+
+**The real defect this exposes is methodological: a gate test whose result
+depends on the date it is run is not reproducible**, which contradicts the
+whole basis of the ledger. Two fixes, both needing the human's call because
+they change what a gate asserts:
+1. **Pin the window** (fixed start/end dates, or a cached fixture) so the test
+   is deterministic and a failure means a code change, not a calendar change.
+2. **Split deployed-config assertions from legacy-config ones**, so drift in a
+   retired 1h cell cannot mask — or block — a real regression in the 4h book.
+
+Until then: **G5 remains green for the deployed configuration** and red for a
+retired one. Do not loosen the assert; that would convert a live tripwire into
+decoration.
+
 ## Bot-type taxonomy triage (2026-08-03) — 32 architectures vs this ledger
 
 Source: `research/Trading Bot Types Reference.pdf` (32 bot types) and

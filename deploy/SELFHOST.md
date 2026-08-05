@@ -137,7 +137,7 @@ Keep SSH key-only: in `/etc/ssh/sshd_config.d/hardening.conf` set
 - Reboots/outages: everything is `restart: unless-stopped` + docker
   enabled on boot — the stack self-resumes; the collector just has a gap.
 - If you care about the tick archive long-term, rsync it off occasionally:
-  `docker run --rm -v rofl-collector_tick_data:/d -v $PWD:/out alpine tar czf /out/ticks-$(date +%F).tgz /d`
+  `tar czf ticks-$(date -u +%F).tgz -C ~/rofl/data ticks`
 
 ## 8. Migration notes
 

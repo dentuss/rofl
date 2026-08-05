@@ -182,6 +182,9 @@ from today and the 8-week clock resets.
 | `deploy/setup.sh` | box prep: docker + compose + clone + prebuild; **starts nothing** |
 | `deploy/init-collector.sh` | one-shot collector box (1 OCPU / 2 GB): clock, swap, docker, QUAL23 symbols, **starts collecting** — no keys involved |
 | `deploy/init-trading.sh` | one-shot trading box (1 OCPU / 10 GB): clock, swap, docker, `.env` template, image build — **deliberately starts nothing** |
+| `deploy/pull-data.sh` | incremental rsync of both boxes into `./data` (read-only on the remote; safe mid-position) |
+| `core/datastore.py` | loaders for everything the boxes write: `load_ticks`, `load_events`, `load_states`, and `live_blotter()` in `core.backtest.Trade` shape (the L2 reconcile input) |
+| `research/data_health.py` | post-pull report: tick coverage vs expected, missing days, per-symbol gaps, leg heartbeats, PnL by exit reason |
 | `test_*.py` | plain-assert suites (no pytest): engines, sizing, maker entries, TP limits, reduce-only, exec parity |
 
 Older `research/` scripts from dead eras are kept deliberately — the

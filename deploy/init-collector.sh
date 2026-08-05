@@ -109,7 +109,6 @@ DO TWO MORE THINGS:
      is at risk here, but the tick record is, and it cannot be rebuilt.
   2. Schedule the volume backup (the data lives in a Docker volume; lose
      the instance, lose the history):
-       docker run --rm -v rofl-collector_tick_data:/d -v \$PWD:/out alpine \\
-         tar czf /out/ticks-\$(date -u +%F).tgz /d
+       tar czf ticks-\$(date -u +%F).tgz -C ~/rofl/data ticks
 --------------------------------------------------------------------
 EOF
