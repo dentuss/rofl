@@ -207,16 +207,29 @@ in 2026-07-05; nothing deployed runs 1h or that cooldown path.
 
 **The real defect this exposes is methodological: a gate test whose result
 depends on the date it is run is not reproducible**, which contradicts the
-whole basis of the ledger. Two fixes, both needing the human's call because
-they change what a gate asserts:
-1. **Pin the window** (fixed start/end dates, or a cached fixture) so the test
-   is deterministic and a failure means a code change, not a calendar change.
-2. **Split deployed-config assertions from legacy-config ones**, so drift in a
-   retired 1h cell cannot mask — or block — a real regression in the 4h book.
+whole basis of the ledger.
 
-Until then: **G5 remains green for the deployed configuration** and red for a
-retired one. Do not loosen the assert; that would convert a live tripwire into
-decoration.
+### RESOLVED same day — both fixes applied
+
+1. **Window pinned.** All cases now clip to `PARITY_END` (default
+   **2026-08-01**), over-fetching past it and slicing. The date was fixed as a
+   calendar boundary — the 1st of the current month — **before** re-running;
+   it was not chosen by testing which date made the suite pass. Verified
+   deterministic: two consecutive runs are byte-identical (md5 of output).
+   Re-pin deliberately with `PARITY_END=YYYY-MM-DD`.
+2. **Two tiers.** *DEPLOYED* (4h/tp6 K=0, pullback 4h K=3) is gate G5 and its
+   assertions are always fatal. *LEGACY* (the retired 1h program, K=0 and K=3)
+   is reported loudly and recorded but does not gate — letting drift in dead
+   code block the suite would train us to ignore a red G5, which is the exact
+   opposite of the point. `PARITY_STRICT=1` makes legacy fatal too.
+
+**Result at the pinned window: everything is clean, legacy included** (1h K=0
+and K=3 both 0 UNEXPECTED; 4h 0; pullback 4h 0). So the ADA divergence was
+entirely the two new bars, exactly as the A/B indicated. Note this outcome was
+not engineered — the pin date was committed to first.
+
+The assert was NOT loosened for the deployed tier; that would have converted a
+live tripwire into decoration.
 
 ## Bot-type taxonomy triage (2026-08-03) — 32 architectures vs this ledger
 

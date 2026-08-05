@@ -173,11 +173,20 @@ data/
   live/<sym>-<leg>/logs/{bot.log,events-YYYY-MM-DD.jsonl}
 ```
 
-From the laptop:
+From the laptop — once, then one command forever after:
+
 ```bash
-deploy/pull-data.sh              # both boxes   (also: ticks | live)
-./.venv/bin/python research/data_health.py
+make setup     # enter the two box IPs; writes deploy/hosts.env, verifies SSH
+make pull      # rsync BOTH boxes into ./data, then print the health report
 ```
+
+Other targets: `make ticks` / `make live` (one box), `make status`
+(reachability + local sizes), `make health` (report only), `make watch`
+(pull on a loop — leave it running while you work), `make backup`, `make test`.
+`make` on its own lists them.
+
+Hosts resolve env var → `deploy/hosts.env` → `~/.ssh/config` alias, so after
+`make setup` you never pass an IP again.
 
 `pull-data.sh` is **read-only on the remote** — it only reads, restarts
 nothing, and is safe to run against a live trading box mid-position. Add

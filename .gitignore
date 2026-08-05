@@ -22,3 +22,5 @@ package-lock.json
 
 # Pulled box data (collector ticks + live state/logs) — see deploy/pull-data.sh
 data/
+deploy/hosts.env
+backups/
