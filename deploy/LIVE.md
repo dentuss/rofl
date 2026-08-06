@@ -242,3 +242,35 @@ live record matching the model. Archive state before any resize
 - The backtest's monthly numbers are common-window (2023-08+). The honest
   full-history anchor is lower. Judge the program on L2's reconcile, not on
   week-1 P&L.
+
+---
+
+## ⚠ Restart trap: the state file overrides `STARTING_EQUITY`
+
+`State.load()` reads `equity=d["equity"]` from `bot_state.json` when the file
+exists — **the env var is only used when there is no state file.** So changing
+`LEG4H_LIVE_EQUITY` in `.env` has NO effect on a leg that already has state.
+
+Hit for real on 2026-08-06: the stack had been started with
+`LEG4H_LIVE_EQUITY=898` (the per-ACCOUNT balance instead of per-leg), writing
+16 state files at `equity: 898.0`. Correcting `.env` to 112.20 alone would
+have left every leg resuming 8x oversized. Zero trades had been taken, so
+nothing was lost — but only by luck.
+
+**Whenever you change the sizing, clear the state before restarting:**
+
+```bash
+cd ~/rofl
+tar czf ~/state-backup-$(date -u +%Y%m%d-%H%M%S).tgz data/live   # cheap insurance
+sudo find data/live -name bot_state.json -delete
+sudo find data/live -name heartbeat -delete
+# events-*.jsonl are the audit trail — KEEP them
+```
+
+`sudo` is required: the containers run as root, so bind-mounted files are
+root-owned even though `ubuntu` can read them (which is why `pull-data.sh`
+still works without it).
+
+Only safe when the legs are **flat**. If any position is open, closing it on
+the exchange first is mandatory — otherwise resume sees an unknown position
+and HALTs that leg (by design).
