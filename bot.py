@@ -663,25 +663,45 @@ class Exchange:
         TP_LIMIT_ORDERS=1 (engine parity for tp_as_limit, adopted 2026-07-06):
         the TP becomes a LIMIT order at the target (maker 0.02%) instead of
         the default conditional market (taker 0.055% + slip). Bybit requires
-        tpslMode=Partial for limit-type TPs; tpSize/slSize are set to the
-        full order qty so the whole position stays covered and OCO semantics
-        hold (either side filling cancels the other). The SL stays a market
-        conditional — stops must never rest as limits."""
+        tpslMode=Partial for limit-type TPs. The SL deliberately stays a
+        MARKET conditional (slOrderType defaults to Market) — a stop resting
+        as a limit can fail to fill in the gap it exists to protect against.
+
+        2026-08-06 — this previously failed live with retCode 10001 "Request
+        parameter error", so EVERY entry was skipped and the book never
+        traded. Two faults, both fixed here:
+          1. tpSize / slSize are NOT parameters of /v5/order/create. They
+             belong to /v5/position/trading-stop. Bybit rejects the unknown
+             fields. Under tpslMode=Partial on an entry order the TP/SL cover
+             that order's qty, which is what we want anyway.
+          2. Bybit V5 takes every numeric as a STRING. ccxt stringifies the
+             fields it knows (price, qty, stopLoss, takeProfit) but passes
+             custom params through raw, so tpLimitPrice went as a JSON float.
+        Verified against the documented linear example, which carries
+        tpslMode/tpOrderType/tpLimitPrice and no sizes."""
         if sl is None and tp is None or self.paper:
             return {}
         params: dict = {}
         if sl is not None:
-            params["stopLoss"] = self._round_price(sl)
+            params["stopLoss"] = self._fmt_price(sl)
         if tp is not None:
-            params["takeProfit"] = self._round_price(tp)
+            params["takeProfit"] = self._fmt_price(tp)
             if self.cfg.tp_limit_orders and qty is not None:
                 params["tpslMode"] = "Partial"
                 params["tpOrderType"] = "Limit"
-                params["tpLimitPrice"] = self._round_price(tp)
-                params["tpSize"] = qty
-                if sl is not None:
-                    params["slSize"] = qty
+                params["tpLimitPrice"] = self._fmt_price(tp)
         return params
+
+    def _fmt_price(self, p: float) -> str:
+        """Round to the symbol's tick AND return a STRING — Bybit V5 rejects
+        bare numbers on custom params with retCode 10001."""
+        rounded = self._round_price(p)
+        if self._ccxt is not None:
+            try:
+                return str(self._ccxt.price_to_precision(self._ccxt_symbol(), rounded))
+            except Exception:
+                pass
+        return str(rounded)
 
     def market_buy(self, qty: float, sl: float | None = None,
                    tp: float | None = None, reduce_only: bool = False) -> dict:

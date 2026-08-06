@@ -40,25 +40,30 @@ print("[1] paper mode attaches nothing                        OK")
 ex = _ex(tp_limit=False)
 ex.paper = False
 p = ex._attached_sltp_params(90.0, 110.0, qty=0.5)
-assert p == {"stopLoss": 90.0, "takeProfit": 110.0}, p
-print("[2] flag off: plain stopLoss/takeProfit (unchanged)    OK")
+# STRINGS since 2026-08-06: Bybit V5 rejects bare numerics on these params
+# with retCode 10001 (see test_order_params.py). This assertion previously
+# encoded the buggy float form.
+assert p == {"stopLoss": "90.0", "takeProfit": "110.0"}, p
+print("[2] flag off: plain stopLoss/takeProfit (strings)      OK")
 
 # 3) live path, flag on -> Bybit V5 limit-TP params
 ex = _ex(tp_limit=True)
 ex.paper = False
 p = ex._attached_sltp_params(90.0, 110.0, qty=0.5)
-assert p["stopLoss"] == 90.0 and p["takeProfit"] == 110.0
+assert p["stopLoss"] == "90.0" and p["takeProfit"] == "110.0"
 assert p["tpslMode"] == "Partial" and p["tpOrderType"] == "Limit"
-assert p["tpLimitPrice"] == 110.0
-assert p["tpSize"] == 0.5 and p["slSize"] == 0.5
-print("[3] flag on: Partial/Limit/tpLimitPrice/tpSize/slSize  OK")
+assert p["tpLimitPrice"] == "110.0"
+# tpSize/slSize must NOT be present: they are /v5/position/trading-stop
+# params, not /v5/order/create ones, and Bybit 10001s on the unknown fields.
+assert "tpSize" not in p and "slSize" not in p, p
+print("[3] flag on: Partial/Limit/tpLimitPrice, NO sizes      OK")
 
 # 4) flag on, qty unknown -> graceful plain attach
 p = ex._attached_sltp_params(90.0, 110.0)
-assert p == {"stopLoss": 90.0, "takeProfit": 110.0}, p
+assert p == {"stopLoss": "90.0", "takeProfit": "110.0"}, p
 # SL-only attach never gains Partial keys either
 p = ex._attached_sltp_params(90.0, None, qty=0.5)
-assert p == {"stopLoss": 90.0}, p
+assert p == {"stopLoss": "90.0"}, p
 print("[4] qty-unknown / SL-only fall back to plain attach    OK")
 
 print("\nALL TP_LIMIT_ORDERS PARAM TESTS PASSED")

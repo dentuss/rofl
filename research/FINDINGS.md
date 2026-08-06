@@ -231,6 +231,50 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## ⚠ 2026-08-06 — TP_LIMIT_ORDERS never worked live: every entry was skipped
+
+The first live start (2026-08-05 11:38, 93 seconds, brought straight down)
+placed **zero orders**. Two legs had genuine entry signals — avax-t LONG in
+CHOP, ada-t LONG in BULL — and both logged:
+
+    maker entry not placed (bybit {"retCode":10001,"retMsg":"Request parameter
+    error."}) — postonly reject or API error; sweeping + skipping this bar
+
+The bot degrades safely (skip the bar), so nothing reached the exchange:
+order history, executions and closed-PnL are all **0 on both accounts**. But
+it means an L1 run would have sat inert for two weeks looking merely quiet —
+the `-p` legs fire ~once per 6 weeks, so "no trades" is exactly what a healthy
+book looks like early on. **That is the dangerous part: the failure mode was
+indistinguishable from normal.**
+
+Root cause, two faults in `Exchange._attached_sltp_params`, confirmed against
+the Bybit V5 docs:
+
+1. **`tpSize` / `slSize` are not `/v5/order/create` parameters.** They belong
+   to `/v5/position/trading-stop`. Bybit's documented `linear` Partial example
+   carries `tpslMode`/`tpOrderType`/`tpLimitPrice` and **no sizes**. The
+   unknown fields are the 10001.
+2. **Bybit V5 requires numerics as STRINGS.** ccxt stringifies the params it
+   knows (price, qty, stopLoss, takeProfit) but forwards custom ones raw, so
+   `tpLimitPrice` went as a JSON float.
+
+**Both entry paths were affected** — the post-only maker entry AND the market
+entry used as the `ENTRY_LIMIT_ORDERS=0` fallback, because both attach TP/SL
+through the same helper. So the ROADMAP IF→THEN fallback ("Bybit rejects a
+post-only entry → set ENTRY_LIMIT_ORDERS=0") would ALSO have failed. That row
+is only a real fallback now.
+
+Why nothing caught it: `test_tp_limit_orders.py` asserted the *buggy* shape
+(floats, plus tpSize/slSize) — it locked in the defect rather than the
+contract. Nothing in the suite validated a payload against Bybit's schema.
+`test_order_params.py` now builds the real ccxt payload through a dry
+transport (no keys, nothing sent) and asserts: no `/v5/position/trading-stop`
+params, no bare numerics, `PostOnly` set, `tpslMode=Partial` present — and
+includes a regression case proving the guard rejects the payload that shipped.
+
+**Status: fixed and unit-verified, NOT yet proven live.** Only a real fill
+proves it, which is L1's job. The first entry attempt is the thing to watch.
+
 ## Bot-type taxonomy triage (2026-08-03) — 32 architectures vs this ledger
 
 Source: `research/Trading Bot Types Reference.pdf` (32 bot types) and
