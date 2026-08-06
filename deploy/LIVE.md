@@ -25,9 +25,12 @@ percentages are deposit-invariant, only the final-$ column scales):
 
 | | final$ | CAGR | Sh(mo) | dMDD | worst day | worst month | win% | IS → OOS |
 |---|---|---|---|---|---|---|---|---|
-| **UNIT WEIGHTS (live now)** | 2,398 | **10.4%** | **1.50** | **−4.5%** | −1.5% | −1.7% | 57 | 1.47 → 1.51 |
-| @15% vol (x2.1) — L3 later | 3,210 | 22.2% | 1.49 | −9.2% | −3.1% | −3.5% | 57 | 1.46 → 1.50 |
-| @25% vol (x3.5) — L3 later | 4,555 | 37.9% | 1.48 | −15.1% | −5.2% | −5.8% | 57 | 1.44 → 1.49 |
+| **UNIT WEIGHTS (L1 runs this)** | 2,358 | **9.5%** | **1.33** | **−5.6%** | −1.4% | −3.6% | 61 | 1.45 → 1.19 |
+| @15% vol (x2.1) — L3 later | 3,112 | 20.3% | 1.32 | −11.4% | −3.0% | −7.5% | 61 | 1.44 → 1.20 |
+| @25% vol (x3.5) — L3 later | 4,322 | 34.4% | 1.32 | −18.3% | −5.0% | −12.2% | 58 | 1.42 → 1.21 |
+
+> Re-measured 2026-08-03 after July 2026 closed at −3.64%, the worst month in
+> the window. The older 10.4 / 1.50 / −4.5 / −1.7 row predates it.
 
 Anchor on the **full-history Sharpe ~1.2** (the 2022-inclusive gate), not the
 table's 1.5: expect the live experience to be *worse* than the common-window
@@ -106,10 +109,11 @@ TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
 
 # --- sizing: REQUIRED. real per-account balance / 8. --------------------
-# Do NOT leave this blank. The compose falls back to ${LEG4H_LIVE_EQUITY:-112.50},
-# which assumed a $900/$900 split; the ACTUAL split is 797.65/999.49
-# (ROADMAP L0.5), so 112.50 now mis-sizes BOTH books silently.
-LEG4H_LIVE_EQUITY=
+# PER LEG = per-account balance / 8, and this ONE value feeds all 16 legs.
+# Entering the per-ACCOUNT balance (~898) sizes the book 8x too large — that
+# happened on 2026-08-06. As of that date: main 898.89, sub 897.60, so use the
+# lower / 8 = 112.20. init-trading.sh rejects >=300 and <10.
+LEG4H_LIVE_EQUITY=112.20
 EOF
 chmod 600 .env
 ```
@@ -139,7 +143,7 @@ for tag, k, s in (("MAIN", env.get('API_KEY'), env.get('API_SECRET')),
 PY
 ```
 
-Expected: MAIN ≈ 900.00, SUB ≈ 900.00. `AuthenticationError` = wrong
+Expected: MAIN ≈ 898.89, SUB ≈ 897.60 (verified 2026-08-06). `AuthenticationError` = wrong
 key/secret or missing IP whitelist — fix before continuing.
 
 ```bash
