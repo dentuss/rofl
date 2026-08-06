@@ -746,9 +746,19 @@ class Exchange:
 
     def fetch_order_status(self, order_id: str) -> dict:
         """Normalized order status: {status: open|closed|canceled|rejected|
-        unknown, filled: float, avg_px: float|None}."""
-        o = self._ccxt.fetch_order(order_id, self._ccxt_symbol(),
-                                   params=self._ccxt_params())
+        unknown, filled: float, avg_px: float|None}.
+
+        2026-08-06: ccxt REFUSES bybit fetchOrder without acknowledged=True —
+        it raises "can only access an order if it is in last 500 orders" as a
+        warning-exception before making any call. Every status check therefore
+        failed, the pending entry could never be resolved, and after 2 bars the
+        leg CRITICAL-blocked its own entries — while the order had actually
+        FILLED on the exchange. The bot held no position in state; Bybit held a
+        live, SL/TP-protected 260 ADA long. Passing acknowledged=True is what
+        ccxt asks for; the 500-order window is far beyond our reach at 16 legs
+        on a 4h clock."""
+        params = self._ccxt_params({"acknowledged": True})
+        o = self._ccxt.fetch_order(order_id, self._ccxt_symbol(), params=params)
         status = (o.get("status") or "unknown").lower()
         filled = float(o.get("filled") or 0.0)
         avg = o.get("average")
@@ -2067,7 +2077,13 @@ class Bot:
             # untracked position rather than trade around it. Skipped when a
             # pending is tracked — cancel_all would kill our own order.
             try:
-                self.ex.cancel_all()
+                # ORDER MATTERS. Check for a position BEFORE sweeping orders:
+                # if the exchange holds one, its resting reduce-only SL/TP are
+                # the ONLY thing protecting it, and cancel_all would strip them
+                # and leave the position naked while we HALT — the exact
+                # opposite of safe. Found 2026-08-06, when a filled-but-
+                # unbooked ADA long was sitting behind a flat state; a restart
+                # would have de-protected it. Sweep only when genuinely flat.
                 net = self.ex.fetch_position_size()
                 if net is not None and abs(net) > 1e-9:
                     self._halted = True
@@ -2082,6 +2098,10 @@ class Bot:
                                             f"position at startup; bot HALTED")
                     except Exception:
                         pass
+                else:
+                    # Genuinely flat on both sides — now it is safe to clear
+                    # any orphaned resting order from a crash window.
+                    self.ex.cancel_all()
             except Exception as e:
                 self.log.warning(f"startup flat-state sweep failed: {e}")
         while not self._stop:
