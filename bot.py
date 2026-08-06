@@ -1489,12 +1489,18 @@ class Bot:
                           equity=self.state.equity, symbol=self.cfg.symbol,
                           preset=self.cfg.preset, regime=self._last_regime)
         try:
+            # No symbol= here: Notifier.trade_open has no such parameter and
+            # already prints it via _tag(). Passing it raised TypeError, so
+            # the ADOPT path — i.e. every maker fill, i.e. every entry under
+            # ENTRY_LIMIT_ORDERS=1 — silently sent no Telegram alert at all
+            # (found live 2026-08-06 on the first real fill). regime is passed
+            # to match the market-entry call site.
             self.notifier.trade_open(side=side, qty=qty, price=fill_px,
                                      sl=pe["sl"], tp=pe["tp"],
                                      notional=notional,
                                      risk=pe.get("risk_pct") or 0.0,
                                      equity=self.state.equity,
-                                     symbol=self.cfg.symbol)
+                                     regime=self._last_regime)
         except Exception as e:
             self.log.warning(f"notifier trade_open failed: {e}")
 
