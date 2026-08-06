@@ -60,7 +60,15 @@ the full cost model — no exceptions.**
 **TRACK B — CAPITAL (sequential; no stage starts before the previous is green)**
 
 - [x] **L0 — account isolation.** DONE (sub exists, verified 2026-08-03).
-- [ ] **L0.5 — CAPITAL SPLIT (NEW, blocks L1).** Move main FUND → UNIFIED;
+- [x] **L0.5 — CAPITAL SPLIT — DONE** (verified on-exchange 2026-08-06 from the
+      trading box: main **$899.86**, sub **$898.57**, both in UNIFIED, FUND
+      drained, **0 open positions and 0 open orders on both**). Per-leg
+      `LEG4H_LIVE_EQUITY=112.20` (lower of 899.86/8 and 898.57/8; one value
+      feeds all 16 legs). Both keys AUTH OK *from the box*, so the Bybit IP
+      whitelist is correct. Stale state files from the mis-sized run were
+      cleared — `State.load()` would otherwise have overridden the fix.
+      Original spec below.
+- [ ] ~~L0.5 — capital split~~. Move main FUND → UNIFIED;
       rebalance to ~$898.57 per account; set `LEG4H_LIVE_EQUITY` =
       real per-account balance / 8. Confirm BOTH accounts flat. Until this is
       done, starting the stack means 8 legs with no margin and a 25% size
