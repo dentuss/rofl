@@ -25,7 +25,12 @@ services:
     command: ["python3", "collector.py"]
     environment:
       DATA_DIR: /app/data
-      # SYMBOLS: override to trim/extend; defaults to the 8 majors
+      # MUST be declared here to reach the container. `--env-file` only feeds
+      # compose-file SUBSTITUTION; it does not inject into containers. Without
+      # this line the collector silently fell back to MAJORS8 while
+      # .env.collector held QUAL23 (found 2026-08-06, after 22h of 8-symbol
+      # data that cannot be backfilled). Empty -> collector.py's own default.
+      SYMBOLS: ${SYMBOLS:-}
     volumes:
       - ${ROFL_DATA:-./data}/ticks:/app/data
     logging:

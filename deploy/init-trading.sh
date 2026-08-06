@@ -122,6 +122,27 @@ if ! grep -qE "^LEG4H_LIVE_EQUITY=[0-9]+(\.[0-9]+)?$" .env; then
     warn "LEG4H_LIVE_EQUITY unset/blank — the compose would fall back to 112.50,"
     warn "  which assumes the OLD \$900/\$900 split. Derive it in L0.5 first."
     MISSING=1
+else
+    # Range check. It is PER LEG (per-account balance / 8), and the single
+    # value feeds all 16 legs. Entering the per-ACCOUNT balance (~898) instead
+    # sizes the book 8x too large and is an easy, silent, expensive mistake —
+    # it happened on 2026-08-06. A plain "is it a number" test does not catch
+    # it, so bound it.
+    LEQ=$(grep -E "^LEG4H_LIVE_EQUITY=" .env | head -1 | cut -d= -f2)
+    BOOK=$(awk "BEGIN{printf \"%.0f\", $LEQ*16}")
+    if awk "BEGIN{exit !($LEQ >= 300)}"; then
+        warn "LEG4H_LIVE_EQUITY=$LEQ implies a book of \$$BOOK across 16 legs."
+        warn "  This value is PER LEG = (per-account balance / 8), NOT the"
+        warn "  per-account balance. If your accounts hold ~\$898 each, the"
+        warn "  correct value is ~112, not ~898. Refusing to call this ready."
+        MISSING=1
+    elif awk "BEGIN{exit !($LEQ < 10)}"; then
+        warn "LEG4H_LIVE_EQUITY=$LEQ implies a book of only \$$BOOK — below the"
+        warn "  min-notional floor on most symbols; nearly every entry would skip."
+        MISSING=1
+    else
+        log "LEG4H_LIVE_EQUITY=$LEQ -> book \$$BOOK across 16 legs (sane)"
+    fi
 fi
 
 cat <<EOF

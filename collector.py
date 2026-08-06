@@ -41,10 +41,12 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger("collector")
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
-SYMBOLS = [s.strip() for s in os.getenv(
-    "SYMBOLS",
-    "BTC/USDT:USDT,ETH/USDT:USDT,SOL/USDT:USDT,XRP/USDT:USDT,"
-    "DOGE/USDT:USDT,ADA/USDT:USDT,LINK/USDT:USDT,AVAX/USDT:USDT").split(",")]
+_DEFAULT_SYMBOLS = ("BTC/USDT:USDT,ETH/USDT:USDT,SOL/USDT:USDT,XRP/USDT:USDT,"
+                    "DOGE/USDT:USDT,ADA/USDT:USDT,LINK/USDT:USDT,AVAX/USDT:USDT")
+# `or` not a getenv default: compose passes SYMBOLS="" when unset, and an
+# empty string would otherwise parse to [""] and collect nothing.
+SYMBOLS = [s.strip() for s in (os.getenv("SYMBOLS") or _DEFAULT_SYMBOLS).split(",")
+           if s.strip()]
 
 
 def day_dir(ts: float | None = None) -> Path:

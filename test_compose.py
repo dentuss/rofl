@@ -102,6 +102,20 @@ def test_live_is_live_and_capped():
     print("PASS live stack        MODE=live + mem_limit on all 16, project pinned")
 
 
+def test_collector_declares_symbols():
+    """`--env-file` only feeds compose SUBSTITUTION, not the container. If the
+    collector service does not DECLARE SYMBOLS, init-collector.sh's QUAL23 pin
+    is silently ignored and it collects MAJORS8 instead — which is what
+    happened on 2026-08-06, costing 22h of 15-symbol microstructure that
+    cannot be backfilled."""
+    d = _load("docker-compose.collector.yml")
+    env = d["services"]["collector"]["environment"]
+    assert "SYMBOLS" in env, \
+        "collector service must declare SYMBOLS or .env.collector never reaches it"
+    assert "DATA_DIR" in env
+    print("PASS collector env     SYMBOLS declared (reaches the container)")
+
+
 def test_paper_never_live():
     """Paper must never be able to trade — the one-way door."""
     d = _load("docker-compose.bidir4h-paper.yml")
@@ -119,5 +133,6 @@ if __name__ == "__main__":
     test_live_legs_bind_to_data_root()
     test_tg_control_reads_same_paths_as_legs()
     test_live_is_live_and_capped()
+    test_collector_declares_symbols()
     test_paper_never_live()
     print("\nAll compose tests passed.")
