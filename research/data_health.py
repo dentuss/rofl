@@ -175,6 +175,44 @@ def live_report() -> None:
     print()
 
 
+# L1 baseline: 16 legs x LEG4H_LIVE_EQUITY. The book halt line is a HUMAN
+# control (ROADMAP IF->THEN) — nothing in bot.py enforces it, and per-leg
+# decay does not fire until -20% of a leg, ~2.5x past it. This surfaces it.
+LEG_EQUITY = float(_os.environ.get("LEG4H_LIVE_EQUITY", 112.20))
+HALT_PCT = 0.08
+
+
+def book_report() -> None:
+    st = load_states()
+    print("=" * 88)
+    print("2b) BOOK vs THE -8% HALT LINE (realised only — see the caveat)")
+    print("=" * 88)
+    if st.empty or "equity" not in st:
+        print("  no leg states yet\n")
+        return
+    eq = st["equity"].dropna()
+    if eq.empty:
+        print("  no equity in any state file\n")
+        return
+    base = LEG_EQUITY * len(st)
+    book, pnl = float(eq.sum()), float(eq.sum()) - base
+    pct = 100 * pnl / base if base else 0.0
+    halt_at = -HALT_PCT * base
+    print(f"  baseline  {len(st)} legs x {LEG_EQUITY:.2f} = {base:,.2f}")
+    print(f"  now       {book:,.2f}   realised PnL {pnl:+.2f} ({pct:+.2f}%)")
+    print(f"  halt line {halt_at:+,.2f} ({-HALT_PCT*100:.0f}%)   "
+          f"headroom {pnl - halt_at:+,.2f}")
+    if pnl <= halt_at:
+        print("  *** BOOK HALT LINE BREACHED — flatten and post-mortem before "
+              "any restart (ROADMAP IF->THEN) ***")
+    elif pnl <= halt_at * 0.5:
+        print(f"  ⚠ past HALF the halt budget — watch closely")
+    print("\n  CAVEAT: bot equity is REALISED only; open positions are not marked")
+    print("  to market here, so this LAGS. It is a slow control (worst backtested")
+    print("  month is -3.6%), which is why 12-hourly detection is adequate — but")
+    print("  it is a HUMAN control: nothing in bot.py enforces it.\n")
+
+
 def blotter_report() -> None:
     print("=" * 88)
     print("3) LIVE BLOTTER (core.backtest.Trade shape — the L2 reconcile input)")
@@ -203,6 +241,7 @@ def main() -> None:
     ticks_report()
     sessions_report()
     live_report()
+    book_report()
     blotter_report()
     print("Gaps above are facts. Record them; never synthesise a tick to close one.")
 

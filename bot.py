@@ -876,7 +876,23 @@ class Exchange:
                 return None
             params = self._ccxt_params({"symbol": sym_id, "limit": 20})
             if since_ms:
-                params["startTime"] = int(since_ms)
+                # Clamp to a 6.5-day lookback. Bybit's closed-PnL history is
+                # documented/tooled as a max ~7-day range per query, and our
+                # own 16-day time stop makes >7-day holds routine — so a
+                # position opened 10 days ago would pass a startTime outside
+                # any such window. The failure mode is SILENT (retCode 0, empty
+                # list), not an error, which would send the caller quietly back
+                # to the theoretical SL/TP price and re-open the booked-vs-real
+                # gap this method exists to close.
+                #
+                # NOT a confirmed bug: probed 2026-08-07 with a 31-day
+                # startTime and got retCode 0, but the account has no closed
+                # PnL yet so truncation could not be distinguished from "no
+                # rows". Clamping is free and the scoping is not load-bearing —
+                # rows are newest-first and matched on qty, which is the real
+                # discriminator for a one-position-per-symbol bot.
+                floor_ms = int((time.time() - 6.5 * 86400) * 1000)
+                params["startTime"] = max(int(since_ms), floor_ms)
             resp = self._ccxt.private_get_v5_position_closed_pnl(params)
             rows = (resp.get("result") or {}).get("list") or []
         except Exception as e:

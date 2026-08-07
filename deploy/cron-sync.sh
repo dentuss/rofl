@@ -47,13 +47,27 @@ run() {
             say "=== pull ==="
             make pull; rc=$?
             ;;
+        trackers)
+            # Deterministic and self-reconstructing from the anchor (lagged
+            # signals, so past values never revise) — a missed day is recovered
+            # by the next run, not lost. Scheduled anyway: the 8-week XS record
+            # gates the BOOK50/XS25/BAB25 capital discussion, and "it would
+            # have recovered" is not a reason to leave it unrun for a month,
+            # which is exactly what happened up to 2026-08-07.
+            say "=== sleeve forward trackers ==="
+            XS_ANCHOR=2026-07-09 PYTHONIOENCODING=utf-8 ./.venv/bin/python xs_paper.py || rc=$?
+            SLEEVES_ANCHOR=2026-07-05 PYTHONIOENCODING=utf-8 ./.venv/bin/python sleeves_paper.py || rc=$?
+            ;;
         daily)
-            say "=== daily: pull + prune + backup ==="
+            say "=== daily: pull + prune + backup + trackers ==="
             make pull || rc=$?
             # prune BEFORE backup: a stale .csv sitting next to its .csv.gz is
             # pure duplication (~75 MB/day) and would double the tarball.
             make prune || rc=$?
             make backup || rc=$?
+            say "--- sleeve forward trackers ---"
+            XS_ANCHOR=2026-07-09 PYTHONIOENCODING=utf-8 ./.venv/bin/python xs_paper.py || rc=$?
+            SLEEVES_ANCHOR=2026-07-05 PYTHONIOENCODING=utf-8 ./.venv/bin/python sleeves_paper.py || rc=$?
             ;;
         install)
             cat <<EOF
@@ -67,7 +81,7 @@ EOF
             return 0
             ;;
         *)
-            say "unknown mode '$MODE' (pull|daily|install)"; return 2
+            say "unknown mode '$MODE' (pull|daily|trackers|install)"; return 2
             ;;
     esac
     say "=== $MODE finished rc=$rc ==="

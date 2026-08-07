@@ -231,6 +231,59 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-07 — Full-bot audit: three findings, two non-findings
+
+A deliberate sweep of the money paths, risk controls and program state rather
+than a bug hunt. Recording the NON-findings too, because "I checked and it was
+fine" is evidence and unrecorded checks get re-done.
+
+**F1. The forward sleeve trackers had never run — 4 weeks unrecorded.** No
+`state/`, no track files, not scheduled, not on either box. The XS record is
+what gates the BOOK50/XSMOM25/XSBAB25 capital discussion (≥8 weeks from the
+2026-07-09 anchor), and it did not exist. **Not lost, though:** both trackers
+recompute from public data with ≥1-day-lagged signals, so past values never
+revise and the anchor reconstructs the whole track. Recovered in one run —
+**30 days now on file** (xsmom +0.59%, xsbab +0.15%; the annualised Sharpes
+they print are meaningless at n=30 and are not quoted here). Both are now in
+the daily cron. The lesson is not "we nearly lost it" but that a deterministic
+job with no schedule silently does nothing, and nothing was watching.
+
+**F2. Nothing enforces the book-level −8% halt line.** It is a HUMAN control:
+per-leg decay does not fire until −20% of a leg (~2.5× past the book line),
+`DAILY_LOSS_PCT` is 0/disabled (deliberately — it matches the engine), and no
+component computes book-level PnL at all. In mitigation it is a slow control:
+the worst backtested month is −3.6%, so −8% is a multi-day event and the
+12-hourly cron is adequate detection. **Surfaced, not automated** —
+`data_health` now prints book PnL, the halt line and headroom, with the honest
+caveat that bot equity is REALISED-only so it lags open positions. An
+auto-flatten was deliberately NOT built: a bug in one is worse than the gap.
+
+**F3. `fetch_last_closed_fill` passed an unclamped `startTime`.** Bybit's
+closed-PnL history is documented/tooled as ~7 days per query, and our own
+16-day time stop makes >7-day holds routine — so a position opened 10 days ago
+would query outside any such window. The failure mode is SILENT (retCode 0,
+empty list), which sends the caller quietly back to the theoretical SL/TP price
+and re-opens the booked-vs-real gap the method exists to close. **NOT a
+confirmed bug:** probed with a 31-day `startTime` and got retCode 0, but the
+account has no closed PnL yet, so truncation could not be distinguished from
+"no rows". Clamped to 6.5 days anyway — free, and the scoping is not
+load-bearing (rows are newest-first and matched on qty).
+
+**N1 (non-finding). `equity_peak` poisoning is already handled.** The mis-sized
+run persisted `equity_peak=898` against a new 112.20 leg = a computed −87.5%
+drawdown, which trips the 0.0× decay tier and blocks entries *permanently*. I
+expected the alert's "restart to self-heal" advice to be wrong since the peak
+is persisted — **it is not wrong**: `Bot.run()` heals a peak that exceeds
+`max(equity, starting_equity)*1.05` when `realised_trades == 0`, which is
+exactly this case. Correct, deliberate, and already tested by an earlier
+incident. No change.
+
+**N2 (non-finding). Entry sizing and risk composition are correct.**
+`_effective_risk` composes decay × CHOP × VT × CONF in the same order and form
+as the engine's `mult`, and `enter_position` recomputes notional from the
+POST-rounding qty (so lot-flooring does not silently misstate risk), checks
+SL/TP geometry, and rejects sub-min orders. Parity holds. No change.
+
 ## 2026-08-07 — The PULL demotion trigger cannot be both fast and powered
 
 `research/pull_trigger_power.py` — a report measuring the SAMPLE SIZE behind an

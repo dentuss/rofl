@@ -28,3 +28,4 @@ deploy/hosts.env
 backups/
 logs/
 .cron-sync.lock
+state/
