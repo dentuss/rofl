@@ -779,11 +779,26 @@ class Exchange:
             return False
 
     def cancel_all(self) -> None:
-        """Fail-safe sweep of resting orders for our symbol (used when a
-        limit-entry placement raises after possibly reaching the exchange)."""
+        """Sweep stray ENTRY orders for our symbol — and only those.
+
+        Used when a limit-entry placement raises after possibly reaching the
+        exchange. That is exactly the case where the order may have reached it
+        AND FILLED, in which case Bybit has already attached the reduce-only
+        TP/SL to the new position.
+
+        `orderFilter="Order"` is load-bearing, not decoration. Bybit V5 docs,
+        /v5/order/cancel-all: "for linear or inverse ... if not passed, ALL
+        kinds of orders (active, conditional, TP/SL, trailing stop) will be
+        cancelled." So the unfiltered call we shipped would strip the stop and
+        the target off a position it had just opened, leaving it naked — the
+        precise outcome this sweep exists to avoid. "Order" covers active
+        (non-conditional) orders, which is all a stray entry can be.
+        (Verified against the API docs 2026-08-07, not empirically — testing
+        this against a live protected position is not an acceptable trade.)"""
         try:
-            self._ccxt.cancel_all_orders(self._ccxt_symbol(),
-                                         params=self._ccxt_params())
+            self._ccxt.cancel_all_orders(
+                self._ccxt_symbol(),
+                params=self._ccxt_params({"orderFilter": "Order"}))
         except Exception as e:
             self.log.warning(f"cancel_all failed: {e}")
 

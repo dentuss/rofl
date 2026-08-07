@@ -231,6 +231,59 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-07 — The PULL demotion trigger cannot be both fast and powered
+
+`research/pull_trigger_power.py` — a report measuring the SAMPLE SIZE behind an
+existing pre-registered kill criterion, so it can be specified on evidence.
+
+**Arrivals.** 113 PULL closes over 36 months, book-wide across all 8 names:
+**3.1/month** (median 3, max 8), and **14% of months contain zero trades**. A
+trailing-3-month window holds a median of **9** trades; **100% of windows hold
+fewer than 20**.
+
+**Noise floor.** Bootstrapping the leg's own realised R distribution
+(mean +0.402, sd 1.997, n=113, win rate 35% — 31% tp / 64% sl, the expected
+trend shape of rare large winners), the probability a leg with this leg's TRUE
+positive edge nonetheless shows cumulative R < 0 purely by chance:
+
+| N trades | false-demotion rate | 5th pct cumR | months to accumulate |
+|---|---|---|---|
+| 5 | **44%** | −5.1 | 1.6 |
+| 10 | **30%** | −5.9 | 3.2 |
+| 20 | 18% | −6.8 | 6.4 |
+| 30 | 14% | −5.4 | 9.6 |
+| 50 | 8% | −2.7 | 15.9 |
+
+**The current rule sees ~9 trades, i.e. a ~30% false-demotion rate.** It would
+wrongly demote a perfectly healthy leg roughly one live quarter in three. That
+is not a threshold that needs tuning; it is a rule with no power.
+
+**And it cannot be fixed by raising N.** Getting the false-demotion rate under
+10% needs N≈50 = **~16 months** of live record — far beyond L1/L2, and useless
+against the pre-2023 disease it exists to catch. *No trigger on this leg can be
+both fast and well-powered*, because the leg trades ~3x/month with sd 2.0 R on
+a mean of 0.4. That is a property of the strategy's trade rate, not a defect in
+the rule.
+
+**Re-specification (replaces the trailing-3-month Sharpe rule):**
+
+1. **Catastrophe stop — automatic.** Demote to BLEND75 or triple-only when
+   **cumulative R < −10 over the trailing ≥20 PULL trades**. At N≥20 the 5th
+   percentile of chance outcomes is −6.8, so −10 sits outside the noise floor
+   and fires on genuine collapse (the pre-2023 leg ran −2.57 Sharpe, not a mild
+   sag). Never evaluate below 20 trades.
+2. **Slow review — human, not automatic.** At N≥50 (~16 months), cumulative
+   R < 0 triggers a REVIEW, not a demotion.
+
+**The consequence worth acting on is about weights, not monitoring.** If PULL
+failure is undetectable for ~16 months, the protection cannot come from
+watching it — it has to come from how much capital it is given. BLEND50 hands
+PULL half the book against a leg whose death we could not notice for over a
+year. BLEND75 (25% PULL) halves that exposure. **Not adopted here** — changing
+the blend is a strategy change and owes the full gate battery — but it is now
+an evidence-backed argument rather than a preference, and it should be settled
+before the L3 vol dial multiplies whatever the weights are.
+
 ## 2026-08-07 — Collector first look (~2.5 days): spread is a tick, depth is the risk
 
 `research/collector_first_look.py` — a REPORT, no cells, no strategy claim.

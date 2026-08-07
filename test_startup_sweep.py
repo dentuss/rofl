@@ -105,6 +105,20 @@ def test_unreachable_exchange_does_not_sweep_blindly():
     print("PASS unreachable       -> sweeps (documented; revisit if it bites)")
 
 
+def test_cancel_all_is_scoped_to_entry_orders():
+    """Bybit V5 /v5/order/cancel-all with no orderFilter cancels ALL kinds —
+    "active, conditional, TP/SL, trailing stop". The sweep runs exactly when a
+    limit entry may have reached the exchange AND filled, i.e. when Bybit has
+    just attached reduce-only protection. Unfiltered, it would strip the stop
+    and target off the position it had opened."""
+    import inspect
+    src = inspect.getsource(botmod.Exchange.cancel_all)
+    assert '"orderFilter": "Order"' in src or "'orderFilter': 'Order'" in src, (
+        "cancel_all must pass orderFilter=Order or it cancels protective "
+        "TP/SL conditionals along with the stray entry")
+    print("PASS cancel_all        scoped to orderFilter=Order (spares TP/SL)")
+
+
 def test_order_status_asks_ccxt_for_acknowledgement():
     """The root cause: ccxt refuses bybit fetchOrder without acknowledged."""
     import inspect
@@ -119,6 +133,7 @@ if __name__ == "__main__":
     test_live_position_is_never_de_protected()
     test_short_position_too()
     test_genuinely_flat_still_sweeps()
+    test_cancel_all_is_scoped_to_entry_orders()
     test_unreachable_exchange_does_not_sweep_blindly()
     test_order_status_asks_ccxt_for_acknowledgement()
     print("\nAll startup-sweep tests passed.")

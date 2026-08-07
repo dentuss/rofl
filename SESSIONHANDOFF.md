@@ -16,11 +16,16 @@ diversifying **sleeves** are validated and in forward paper-tracking toward
 a stacked book at Sharpe ~1.8–2.0.
 
 - Repo `dentuss/rofl`, branch **`main`**, clean and fully pushed.
-- **Capital: $1,800.00 USDT** (was $2,177.56 — resized 2026-07-30).
-- **Status: NOT RUNNING.** Live was deployed ~2026-07-08 (stage L1), then
-  stopped twice for personal reasons. Nothing is trading right now.
-- Host plan: **Oracle Cloud Always-Free A1** (`deploy/ORACLE.md`), replacing
-  the EC2 box on cost grounds. Dev machine moving Windows → **Linux**.
+- **Capital: $1,798.43** on-exchange — main $899.86 / sub $898.57, both UNIFIED (L0.5 done 2026-08-06).
+- **Status: L1 LIVE since 2026-08-06**, on Oracle A1. 17 containers, per-leg
+  equity **112.20**. 3 open positions as of 2026-08-07 (ADA long, DOGE short,
+  XRP short), net +$1.84, all with reduce-only limit-TP + market-SL attached.
+  **No close has happened yet** — `close_position`, the corrected fee booking
+  and the TP-limit maker fill are all still unexercised live, as are the 8
+  `-p` legs. Collector running separately since 2026-08-05.
+- Host: **Oracle A1, two boxes** — `rofl-collector` (1 OCPU/2 GB) and
+  `rofl-trading` (1 OCPU/10 GB), both reserved-IP and PAYG. `deploy/ORACLE.md`.
+  Data flows back via `make pull` (cron: 12-hourly + daily backup).
 
 ## 1. What the bot is — BLEND50_CONF
 
@@ -67,36 +72,42 @@ percentages are deposit-invariant, dollars shown on $1,800):
 **Anchor expectations on the full-history Sharpe ~1.2, not 1.5.** The
 2022-inclusive long-history gate PASSED at blend +1.20 full / **+0.18
 pre-2023-08** — the triple leg carries it (+0.57); the pull leg alone was
-**−2.57** pre-2023 and therefore has a pre-registered demotion trigger:
-*trailing-3-month forward Sharpe < 0 → drop to BLEND75 or triple-only.*
+**−2.57** pre-2023 and therefore has a pre-registered demotion trigger —
+**re-specified 2026-08-07** (`research/pull_trigger_power.py`):
+*cumulative R < −10 over the trailing ≥20 PULL trades → BLEND75 or
+triple-only; never evaluate below 20 trades. At N≥50 (~16 months),
+cumulative R < 0 triggers a human REVIEW, not an automatic demotion.*
 
-> ⚠ **The trigger as written is under-powered — re-specify it BEFORE L1**
-> (2026-08-03, `research/book_recheck.py`). The PULL leg fires ~once per 6
-> weeks per name, so a 3-month window routinely contains almost no trades: its
-> last six backtest months are `0.00, 0.00, +0.46, −0.70, 0.00, −0.56` —
-> **three of six with no trades at all.** On that window the trailing-3mo
-> Sharpe reads **−3.93** (last6 −1.08, last12 +0.57) — i.e. it *would* fire,
-> off essentially two observations. A 3-month Sharpe cannot distinguish the
-> pre-2023 −2.57 disease from an ordinary quiet stretch in either direction,
-> so as written it will fire spuriously inside the first live quarter and
-> force an unjustified book change. Suggested replacement (needs the human's
-> call): trigger on **cumulative R over the last N≥20 PULL trades**, or a
-> trade-count-gated Sharpe that simply does not evaluate below a minimum
-> sample. Meanwhile the TRIPLE leg is stable on every horizon (full +1.27,
-> last12 +1.22, last6 +1.26, last3 +1.20). Nothing is firing today: the
-> trigger is defined on a forward live+paper record that does not exist yet.
+> **Why that shape.** Measured: 113 PULL closes over 36 months = 3.1/month
+> book-wide, 14% of months with zero trades, and a trailing-3-month window
+> holds a median of 9 trades. Bootstrapping the leg's own R distribution
+> (mean +0.402, sd 1.997, win rate 35%), a HEALTHY leg still shows cumulative
+> R < 0 by chance **30% of the time at N=10** and 18% at N=20 — so the old
+> 3-month Sharpe rule carried a ~30% false-demotion rate. Raising N does not
+> rescue it: under 10% needs N≈50 ≈ **16 months**. Hence a catastrophe
+> threshold (−10 sits outside the noise floor; 5th pct at N=20 is −6.8)
+> rather than a "< 0" test. Meanwhile TRIPLE is stable on every horizon
+> (full +1.27, last12 +1.22, last6 +1.26, last3 +1.20).
+>
+> ⚠ **The open consequence is about WEIGHTS, not monitoring.** If PULL failure
+> is undetectable for ~16 months, protection cannot come from watching it.
+> BLEND50 gives PULL half the book; BLEND75 would halve that exposure. Not
+> adopted — changing the blend owes the full gate battery — but it should be
+> settled before the L3 dial multiplies whatever the weights are.
 
-## 2. Sizing at $1,800 (changed 2026-07-30 — read before deploying)
+## 2. Sizing (live values as of 2026-08-06)
 
-All **16 legs equal at $112.50** (16 × 112.50 = $1,800.00 exactly),
-**$900.00 per account**. One env var: `LEG4H_LIVE_EQUITY`.
+All **16 legs equal at `LEG4H_LIVE_EQUITY=112.20`** — the LOWER of
+main 899.86/8 and sub 897.60/8, because one value feeds both accounts.
+It is **PER LEG**, not per account: entering ~898 sizes the book 8× too
+large, which happened on 2026-08-06. `init-trading.sh` now rejects ≥300.
 
 The previous split gave BTC legs a premium ($300 each) because BTC's 0.001
 lot ≈ $64 notional is coarse. At $1,800 that premium would make BTC **33%
 of the book** vs the 12.5% the backtest validated — an unvalidated
 concentration bet, so it was dropped in favour of equal weights.
 
-**Known friction to measure in L1:** at $112.50/leg, BTC's risk-scaled
+**Known friction to measure in L1:** at ~$112/leg, BTC's risk-scaled
 notional is ≈$78 in normal vol (trades, slightly under-sized) and ≈$47 in
 high vol (**skips**, logged as min-notional). Watch the skip rate. If BTC
 misses most entries, the fix is a sizing decision — fund the BTC legs
@@ -247,7 +258,7 @@ line — cosmetic; substitute `./.venv/bin/python`.
    FUND wallet with ~$0 in UNIFIED, so the 8 `-t` legs would start with no
    margin; the sub holds $999.49. Move FUND → UNIFIED, rebalance to ~$898.57
    per account, derive `LEG4H_LIVE_EQUITY` from the real balances (NOT the
-   stale 112.50), and confirm both accounts flat.
+   stale 112.50 or the per-ACCOUNT figure), and confirm both accounts flat.
 5. **Resume L1.** Watch for the first `PENDING … maker limit` → `OPEN …
    (maker fill)` pair, the first TP-limit fill, and BTC's skip rate.
 6. **Re-specify the PULL demotion trigger** before L1 concludes (§1 warning).

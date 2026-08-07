@@ -30,11 +30,17 @@ the full cost model — no exceptions.**
 
 ### Where we actually are
 
-- **Nothing is trading. Nothing is collecting.** Both are stopped.
-- Capital **$1,797.14** on-exchange, in the WRONG wallets: main has $797.65
-  in FUND + $0.00003 in UNIFIED (the `-t` legs would start with zero margin);
-  sub `roflbot_pullback` has $999.49 in UNIFIED. Split is 797.65/999.49, not
-  the planned 900/900.
+- **L1 IS LIVE** (since 2026-08-06). 17 containers up on the trading box,
+  `LEG4H_LIVE_EQUITY=112.20`. As of 2026-08-07: **3 open positions**, all on
+  the main/triple account and all correctly protected (limit TP + market SL,
+  both reduce-only) — ADA long +$2.63, DOGE short −$0.30, XRP short −$0.49,
+  net **+$1.84**. Gross exposure $206 of $900 (23%). No close has happened
+  yet. The sub/pullback account is flat, which is correct: `-p` legs fire
+  ~once per 6 weeks per name.
+- **Collector IS RUNNING** on its own box: 23 symbols, 8 with depth, ~5.6%
+  CPU / 120 MB of 2 GB, 41 GB free.
+- Capital **$1,798.43**, split correctly after L0.5: main **$899.86**, sub
+  **$898.57**, both in UNIFIED.
 - Book re-measured 2026-08-03: **CAGR 9.5%, Sh(mo) 1.33, dMDD −5.6%, worst
   month −3.6%** at unit weights (the older 10.4/1.50/−4.5/−1.7 predates July
   2026 closing at −3.64%).
@@ -47,10 +53,9 @@ the full cost model — no exceptions.**
 
 **TRACK A — DATA (no keys, no capital, no gate — start today)**
 
-- [ ] **A1. Collector up** on its own box: `deploy/init-collector.sh`.
-      QUAL23 universe, ~7.7 GB/yr. *Every day this is off is a day of tick
-      history that can never be recovered.* Highest value-per-effort action
-      available, and it is blocked on nothing.
+- [x] **A1. Collector up — DONE** 2026-08-05, QUAL23 (23 symbols). Since
+      2026-08-07 also `depth_1s` (MAJORS8) and `session_1m`, with a
+      self-watchdog and gzip verification. ~12 GB/yr projected.
 - [ ] A2. **+30 days** → data-sanity study (gap rate, liquidation print
       counts, book-snapshot coverage). Not a strategy study.
 - [ ] A3. **+60 days** → tier-2 moonshot studies unlock (liquidation cascades,
@@ -81,10 +86,16 @@ the full cost model — no exceptions.**
 
 **TRACK C — RESEARCH (no capital at risk)**
 
-- [ ] **C1. Re-specify the PULL demotion trigger** *before* L1 concludes. As
-      written (trailing-3mo Sharpe < 0) it fires off ~2 observations and will
-      trip spuriously in the first live quarter — see FINDINGS 2026-08-03.
-      Replace with cumulative R over ≥20 PULL trades, or a trade-count gate.
+- [x] **C1. PULL demotion trigger RE-SPECIFIED** (2026-08-07, measured in
+      `research/pull_trigger_power.py`). The old trailing-3-month Sharpe rule
+      sees ~9 trades and carries a **~30% false-demotion rate**. Raising N does
+      not rescue it: <10% needs N≈50 ≈ 16 months. New rule:
+        * **automatic:** cumulative R < **−10** over the trailing **≥20** PULL
+          trades → BLEND75 or triple-only. Never evaluate below 20 trades.
+        * **review (human):** at N≥50, cumulative R < 0 → review, not demote.
+      Open consequence for the human: PULL failure is undetectable for ~16
+      months, so protection must come from WEIGHT, not monitoring. BLEND50 vs
+      BLEND75 should be settled before the L3 dial multiplies it.
 - [ ] **C2. Grid / short-gamma sleeve**, pre-registered, validated against the
       real 2-day bot result first, then run through 2022 against the sleeve
       law. The only untested payoff shape in the stack. Prediction on record:
@@ -100,7 +111,7 @@ the full cost model — no exceptions.**
 | Bybit rejects the TP limit attach | Set `TP_LIMIT_ORDERS=0`, record the delta. Both fallbacks are documented in the compose. |
 | BTC min-notional skips >30% of its signals | A **sizing** decision, not a strategy change: fund the BTC legs specifically or run ex-BTC. Re-validate weights either way. |
 | Measured costs degrade the edge >0.2 Sh (L2) | HALT, re-price the cost model, re-run the gate battery before resuming. |
-| PULL cumulative R < 0 over ≥20 trades | Demote to BLEND75 or triple-only (per C1's re-specified trigger — **not** the 3-month Sharpe). |
+| PULL cumulative R < **−10** over the trailing ≥20 trades | Demote to BLEND75 or triple-only. −10 sits outside the noise floor (5th pct at N=20 is −6.8); plain "< 0" would fire on a healthy leg 18% of the time. **Never evaluate below 20 trades.** |
 | A month closes worse than −5% | Not an automatic halt: backtest worst is −3.6% and the tail is real. Do re-check realised dMDD against the model. |
 | Live equity diverges >1% from the exchange | Check **per-leg**, never per-bot-vs-account-wide (Pattern: a $112 leg vs a $900 account reads as a false −85%). Suspect the fee model first. |
 | Bybit auth failures | Check NTP/clock skew first — it is the single most common cause. |

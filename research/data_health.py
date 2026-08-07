@@ -108,6 +108,34 @@ def ticks_report() -> None:
     print()
 
 
+def sessions_report() -> None:
+    """The collector's own heartbeat. A gap here is a RECORDED gap — which is
+    the point: an unrecorded one is indistinguishable from a quiet market."""
+    from core.datastore import load_sessions
+    ss = load_sessions()
+    print("=" * 88)
+    print("1b) COLLECTOR SESSIONS (session_1m — restarts and disk pressure)")
+    print("=" * 88)
+    if ss.empty:
+        print("  no session log yet (predates the 2026-08-07 collector upgrade)\n")
+        return
+    gaps = ss.index.to_series().diff().dt.total_seconds().div(60)
+    big = gaps[gaps > 3]
+    print(f"  {len(ss):,} minute-rows, {ss.index[0]} .. {ss.index[-1]}")
+    print(f"  symbols {int(ss.n_symbols.iloc[-1])} ({int(ss.n_depth_symbols.iloc[-1])} "
+          f"with depth)   free disk {float(ss.free_mb.iloc[-1]):,.0f} MB")
+    if len(big):
+        print(f"  ⚠ {len(big)} gap(s) > 3 min — each is a real hole, not noise:")
+        for ts, m in big.tail(5).items():
+            print(f"    {ts}  {m:.0f} min")
+    else:
+        print("  no gaps > 3 min")
+    lo = float(ss.free_mb.min())
+    if lo < 5000:
+        print(f"  ⚠ lowest free disk seen: {lo:,.0f} MB")
+    print()
+
+
 def live_report() -> None:
     print("=" * 88)
     print(f"2) LIVE LEGS   {DATA / 'live'}")
@@ -173,6 +201,7 @@ def main() -> None:
     if not DATA.is_dir():
         raise SystemExit(f"no data dir at {DATA} — run deploy/pull-data.sh first")
     ticks_report()
+    sessions_report()
     live_report()
     blotter_report()
     print("Gaps above are facts. Record them; never synthesise a tick to close one.")
