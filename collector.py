@@ -40,6 +40,13 @@ logging.basicConfig(level=logging.INFO,
                     datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger("collector")
 
+
+def _os_exit(code: int) -> None:
+    """Hard exit: asyncio.gather would swallow a normal SystemExit raised from
+    inside one task, leaving the hung collector running anyway."""
+    logging.shutdown()
+    os._exit(code)
+
 DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
 _DEFAULT_SYMBOLS = ("BTC/USDT:USDT,ETH/USDT:USDT,SOL/USDT:USDT,XRP/USDT:USDT,"
                     "DOGE/USDT:USDT,ADA/USDT:USDT,LINK/USDT:USDT,AVAX/USDT:USDT")
@@ -90,6 +97,9 @@ class Sink:
     def __init__(self, name: str, header: str):
         self.name, self.header = name, header
         self._fh, self._day = None, None
+        # Watchdog input. Seeded to construction time so the grace period is
+        # measured from startup, not from the epoch.
+        self.last_write = time.time()
 
     def write(self, line: str) -> None:
         today = time.strftime("%Y-%m-%d", time.gmtime())
@@ -105,6 +115,7 @@ class Sink:
         try:
             self._fh.write(line + "\n")
             self._fh.flush()
+            self.last_write = time.time()
         except OSError as e:
             # Distinguish "disk problem" from "stream problem". Without this
             # the caller logs a websocket retry and loops forever writing
@@ -218,7 +229,16 @@ async def collect_depth(ex, sym: str, sink: Sink):
             await asyncio.sleep(5)
 
 
-async def session_logger(sink: Sink):
+# A hung websocket loop keeps the CONTAINER healthy while recording nothing:
+# `restart: unless-stopped` only acts on process EXIT, and Docker does not
+# restart merely-unhealthy containers. So the collector watches itself and
+# exits, which turns a silent indefinite hole into a bounded, recorded one.
+# Generous default: real Bybit streams go quiet for minutes on thin symbols,
+# and a false restart costs data too.
+STALE_EXIT_SECS = int(os.getenv("STALE_EXIT_SECS", "600"))
+
+
+async def session_logger(sink: Sink, sinks: dict | None = None):
     """Heartbeat + disk pressure, once a minute.
 
     Gaps are facts (see research/data_health.py). Without an explicit record,
@@ -235,6 +255,17 @@ async def session_logger(sink: Sink):
             if mb < MIN_FREE_MB:
                 log.error(f"DISK PRESSURE: {mb:.0f} MB free (< {MIN_FREE_MB}); "
                           f"the collector will start failing writes")
+            # Judge on the FRESHEST market sink: session_1m writes itself every
+            # minute, so including it would make the check vacuous, and a quiet
+            # single symbol must not trigger a restart that costs every symbol.
+            market = [v for k, v in (sinks or {}).items() if k != "session"]
+            if market:
+                idle = time.time() - max(v.last_write for v in market)
+                if idle > STALE_EXIT_SECS:
+                    log.critical(f"NO MARKET DATA for {idle:.0f}s (> "
+                                 f"{STALE_EXIT_SECS}s) — exiting so Docker "
+                                 f"restarts; gap is recorded in session_1m")
+                    _os_exit(1)
         except Exception as e:
             log.warning(f"session logger: {e}")
         await asyncio.sleep(60)
@@ -315,7 +346,7 @@ async def main():
     log.info(f"collector up: {len(SYMBOLS)} symbols "
              f"({len(DEPTH_SYMBOLS)} with depth) -> {DATA_DIR.resolve()}; "
              f"{free_mb():.0f} MB free")
-    tasks = [gzip_rotator(), session_logger(sinks["session"])]
+    tasks = [gzip_rotator(), session_logger(sinks["session"], sinks)]
     for s in SYMBOLS:
         tasks += [collect_trades(ex, s, sinks["trades"]),
                   collect_liq(ex, s, sinks["liq"]),
