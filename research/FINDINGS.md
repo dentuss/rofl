@@ -231,6 +231,97 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-07 — Collector first look (~2.5 days): spread is a tick, depth is the risk
+
+`research/collector_first_look.py` — a REPORT, no cells, no strategy claim.
+2.73M rows over 45.2h observed, 23 symbols. What this sample can and cannot
+support, stated up front: it supports STRUCTURAL microstructure and
+infrastructure facts; it supports NOTHING conditional, because 2.5 days is one
+regime state and zero stress events.
+
+**1. Spread is pinned at exactly one tick, 88–100% of the time.** BTC 99.9% at
+0.10, ETH 99.8% at 0.01, SOL 100.0% at 0.01, ADA 99.9% at 0.0001. So
+"spread" on these perps is just `tickSize / price` — a constant derivable from
+`getInstrumentsInfo` in one call. **Two days of book data confirmed something
+that needed no collection at all.** Recording that plainly because the
+opposite conclusion — "we measured it, therefore we learned it" — is how
+effort gets mistaken for evidence.
+
+**2. The 2bp slip assumption is conservative on 7 of 8 majors, optimistic on
+ADA.** MAJORS8 median half-spread **0.65 bp** vs the assumed 2.0. Implied
+taker round trip 13.3 bp measured vs 16.0 bp modelled. Per-name half-spread:
+BTC 0.01, ETH 0.03, XRP 0.48, LINK 0.61, SOL 0.68, DOGE 0.72, AVAX 0.77 —
+and **ADA 2.61**, where the model understates. (GRT 3.46 is worse but untraded.)
+
+**Recommendation: do NOT lower the 2bp assumption.** Lowering a cost makes
+every backtest look better, which is the direction to distrust on reflex, and
+this window contains no stress-widening whatsoever. Conservative costs are a
+feature. Revisit at A2/A3 with variance in the sample. Logged as measured, not
+adopted.
+
+**3. The finding that matters: top-of-book depth, not spread.** `book_1s`
+carries sizes, so p5 top-of-book notional (thinner side) against real order
+sizes:
+
+| sym | p5 top-of-book | order | order as % of p5 | seconds top < order |
+|---|---|---|---|---|
+| BTC | $8,548 | $65 | 0.8% | 0.19% |
+| ETH | $1,213 | $65 | 5.4% | 1.00% |
+| ADA | $1,714 | $53 | 3.1% | 0.48% |
+| DOGE | $196 | $81 | 41% | 1.76% |
+| **LINK** | **$26** | $65 | **253%** | **9.8%** |
+| **AVAX** | **$29** | $65 | **221%** | **8.7%** |
+
+For six names our size is negligible. **LINK and AVAX top-of-book is below our
+order size ~9% of the time.** Post-only maker ENTRIES are unaffected in cost
+(we rest rather than cross — thin depth delays a fill, it does not worsen it).
+The exposure is the **SL exit**, which is a taker market order and 67.6% of all
+exits: a stop firing into a $26 top-of-book walks levels, at exactly the moment
+depth is worst. This sample cannot size that effect — no stop has fired live —
+and top-of-book alone never could, which is why depth collection was added
+(below).
+
+**4. Liquidations: 1,210/day across 20 symbols** (BTC 507, ETH 413, XRP 381,
+SOL 311, ADA 293 per 1.88d). Projects to ~36k by A2 (30d), ~73k by A3 (60d).
+Raw counts are not the constraint — cascade studies need CLUSTERED prints, and
+whether a stress event falls in the window is not forecastable from here.
+
+**Explicitly still off the table until A2/A3**: liquidation-cascade fades,
+funding-settlement microstructure, book-imbalance signals, and any edge
+estimate of any kind.
+
+## 2026-08-07 — Collector upgraded: depth buckets, disk guard, gzip verification
+
+Changes batched into ONE restart, because every restart is an unbackfillable
+gap in a series whose entire value is continuity.
+
+**`depth_1s` (new, MAJORS8 only).** Cumulative notional within 1/5/10/25 bps of
+mid, per side, 1/second. Stores the ANSWER rather than raw ladders: a 50-level
+ladder for 8 symbols at 1/s is ~100 GB/yr, these buckets are **~4.1 GB/yr**
+(measured 93 B/row), and the buckets are what an execution-cost study consumes.
+**Stated trade-off: if a future study needs the raw shape of the book, buckets
+cannot reconstruct it.** MAJORS8 only, and behind `DEPTH_SYMBOLS`, because
+subscribing 23 symbols to orderbook.50 is ~1150 msg/s of delta parsing on a
+1-OCPU box — adding a new series must not risk starving the ones that already
+work. `book_1s` (top of book, all 23) continues unchanged.
+
+**Two latent data-loss bugs fixed while in there:**
+* `gzip_rotator` deleted the source `.csv` with **no verification**. A short
+  write under disk pressure would have left a truncated `.gz` and destroyed
+  the only other copy of a day. Now decompresses and reads the whole `.gz`
+  before unlinking; on failure it keeps the `.csv` and drops the bad `.gz`.
+* `Sink.write` did not catch `OSError`, so a full disk would surface as a
+  websocket error in the caller's handler — logging "retrying in 5s" forever
+  while recording nothing. Now logged as `SINK WRITE FAILED` with free space.
+
+**`session_1m` (new).** One row per minute: symbol counts and free disk. Makes
+gaps EXPLICIT rather than inferred — an unrecorded gap is indistinguishable
+from "the market was quiet" at analysis time. ~50 KB/day. Also warns below
+`MIN_FREE_MB` (default 2048).
+
+Projected disk: 7.7 → **~12 GB/yr**, ~3 years on the 41 GB free of the
+collector's 50 GB boot volume.
+
 ## ⚠ 2026-08-06 — TP_LIMIT_ORDERS never worked live: every entry was skipped
 
 The first live start (2026-08-05 11:38, 93 seconds, brought straight down)

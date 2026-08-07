@@ -49,6 +49,35 @@ SYMBOLS = [s.strip() for s in (os.getenv("SYMBOLS") or _DEFAULT_SYMBOLS).split("
            if s.strip()]
 
 
+# Depth is an EXECUTION question, so it is collected only for the names we
+# actually trade. Subscribing 23 symbols to orderbook.50 would mean ~1150
+# msg/s of delta parsing on a 1-OCPU box and risks starving the streams that
+# already work — damaging an irreplaceable series to add a new one. MAJORS8
+# keeps it to 8. Set DEPTH_SYMBOLS="" to disable entirely.
+_DEFAULT_DEPTH = ("BTC/USDT:USDT,ETH/USDT:USDT,SOL/USDT:USDT,XRP/USDT:USDT,"
+                  "DOGE/USDT:USDT,ADA/USDT:USDT,LINK/USDT:USDT,AVAX/USDT:USDT")
+_depth_env = os.getenv("DEPTH_SYMBOLS")
+DEPTH_SYMBOLS = [x.strip() for x in
+                 ((_DEFAULT_DEPTH if _depth_env is None else _depth_env).split(","))
+                 if x.strip() and x.strip() in SYMBOLS]
+# Cumulative notional available within N bps of mid, per side. Chosen to
+# bracket real order sizes: at $1,800 a leg trades $50-80, and 2026-08-07
+# measurement found LINK/AVAX top-of-book below that ~9% of the time.
+DEPTH_BPS = (1, 5, 10, 25)
+# Stop writing before the disk is full: a full disk raises OSError inside
+# Sink.write, which the collect_* handlers swallow as "retrying in 5s" — the
+# collector would spin forever, logging warnings, silently recording nothing.
+MIN_FREE_MB = int(os.getenv("MIN_FREE_MB", "2048"))
+
+
+def free_mb() -> float:
+    try:
+        st = os.statvfs(DATA_DIR)
+        return st.f_bavail * st.f_frsize / 1024 / 1024
+    except OSError:
+        return float("inf")
+
+
 def day_dir(ts: float | None = None) -> Path:
     d = DATA_DIR / time.strftime("%Y-%m-%d", time.gmtime(ts or time.time()))
     d.mkdir(parents=True, exist_ok=True)
@@ -73,8 +102,16 @@ class Sink:
             if fresh:
                 self._fh.write(self.header + "\n")
             self._day = today
-        self._fh.write(line + "\n")
-        self._fh.flush()
+        try:
+            self._fh.write(line + "\n")
+            self._fh.flush()
+        except OSError as e:
+            # Distinguish "disk problem" from "stream problem". Without this
+            # the caller logs a websocket retry and loops forever writing
+            # nothing.
+            log.error(f"SINK WRITE FAILED ({self.name}): {e} — "
+                      f"{free_mb():.0f} MB free")
+            raise
 
 
 async def collect_trades(ex, sym: str, sink: Sink):
@@ -144,6 +181,65 @@ async def collect_book(ex, sym: str, sink: Sink):
             await asyncio.sleep(5)
 
 
+async def collect_depth(ex, sym: str, sink: Sink):
+    """Cumulative notional within N bps of mid, per side, at most 1/second.
+
+    Stores the ANSWER (how much size sits within a price band) rather than raw
+    ladders: a 50-level ladder for 8 symbols at 1/s is ~100 GB/yr, the buckets
+    are ~4 GB/yr, and the buckets are what an execution-cost study actually
+    consumes. The trade-off is deliberate and worth stating: if a future study
+    needs the raw shape of the book, these buckets cannot reconstruct it.
+    book_1s (top of book, all 23 symbols) is unchanged and continues alongside.
+    """
+    base = sym.split("/")[0]
+    last = 0
+    while True:
+        try:
+            ob = await ex.watch_order_book(sym, limit=50)
+            now = int(time.time())
+            bids, asks = ob.get("bids") or [], ob.get("asks") or []
+            if now == last or not bids or not asks:
+                continue
+            last = now
+            mid = (bids[0][0] + asks[0][0]) / 2
+            if mid <= 0:
+                continue
+            out = []
+            for side in (bids, asks):
+                sign = -1 if side is bids else 1
+                for bps in DEPTH_BPS:
+                    lim = mid * (1 + sign * bps / 1e4)
+                    tot = sum(px * qty for px, qty in side
+                              if (px >= lim if sign < 0 else px <= lim))
+                    out.append(f"{tot:.2f}")
+            sink.write(f"{now},{base},{mid:.8f}," + ",".join(out))
+        except Exception as e:
+            log.warning(f"depth {sym}: {e}; retrying in 5s")
+            await asyncio.sleep(5)
+
+
+async def session_logger(sink: Sink):
+    """Heartbeat + disk pressure, once a minute.
+
+    Gaps are facts (see research/data_health.py). Without an explicit record,
+    a gap is indistinguishable from "the market was quiet" at analysis time,
+    and the only honest response to an unrecorded gap is to distrust the
+    window around it. One row per minute makes every gap self-evident and
+    costs ~50 KB/day.
+    """
+    while True:
+        try:
+            mb = free_mb()
+            sink.write(f"{int(time.time())},{len(SYMBOLS)},{len(DEPTH_SYMBOLS)},"
+                       f"{mb:.0f}")
+            if mb < MIN_FREE_MB:
+                log.error(f"DISK PRESSURE: {mb:.0f} MB free (< {MIN_FREE_MB}); "
+                          f"the collector will start failing writes")
+        except Exception as e:
+            log.warning(f"session logger: {e}")
+        await asyncio.sleep(60)
+
+
 async def collect_ticker(ex, sym: str, sink: Sink):
     """Mark/index/funding/OI once per minute (from the ticker stream)."""
     base = sym.split("/")[0]
@@ -174,11 +270,24 @@ async def gzip_rotator():
                 if not d.is_dir() or d.name == today:
                     continue
                 for f in d.glob("*.csv"):
-                    with open(f, "rb") as src, \
-                            gzip.open(f"{f}.gz", "wb") as dst:
+                    gz = Path(f"{f}.gz")
+                    with open(f, "rb") as src, gzip.open(gz, "wb") as dst:
                         shutil.copyfileobj(src, dst)
+                    # VERIFY before unlinking the only other copy. A short
+                    # write (disk pressure) or an interrupted flush can leave a
+                    # truncated .gz; deleting the .csv on faith would destroy
+                    # a day of unbackfillable history.
+                    try:
+                        with gzip.open(gz, "rb") as chk:
+                            while chk.read(1 << 20):
+                                pass
+                    except Exception as e:
+                        log.error(f"gzip verify FAILED for {gz}: {e} — "
+                                  f"keeping {f}")
+                        gz.unlink(missing_ok=True)
+                        continue
                     f.unlink()
-                    log.info(f"gzipped {f}")
+                    log.info(f"gzipped + verified {f}")
         except Exception as e:
             log.warning(f"rotator: {e}")
         await asyncio.sleep(3600)
@@ -199,14 +308,21 @@ async def main():
         "liq": Sink("liq", "ts_ms,sym,side,price,amount"),
         "book": Sink("book_1s", "ts,sym,bid,bid_sz,ask,ask_sz"),
         "ticker": Sink("ticker_1m", "ts,sym,last,mark,index,funding,oi"),
+        "depth": Sink("depth_1s", "ts,sym,mid," + ",".join(
+            [f"bid_{b}bp" for b in DEPTH_BPS] + [f"ask_{b}bp" for b in DEPTH_BPS])),
+        "session": Sink("session_1m", "ts,n_symbols,n_depth_symbols,free_mb"),
     }
-    log.info(f"collector up: {len(SYMBOLS)} symbols -> {DATA_DIR.resolve()}")
-    tasks = [gzip_rotator()]
+    log.info(f"collector up: {len(SYMBOLS)} symbols "
+             f"({len(DEPTH_SYMBOLS)} with depth) -> {DATA_DIR.resolve()}; "
+             f"{free_mb():.0f} MB free")
+    tasks = [gzip_rotator(), session_logger(sinks["session"])]
     for s in SYMBOLS:
         tasks += [collect_trades(ex, s, sinks["trades"]),
                   collect_liq(ex, s, sinks["liq"]),
                   collect_book(ex, s, sinks["book"]),
                   collect_ticker(ex, s, sinks["ticker"])]
+        if s in DEPTH_SYMBOLS:
+            tasks.append(collect_depth(ex, s, sinks["depth"]))
     await asyncio.gather(*tasks)
 
 

@@ -41,7 +41,16 @@ TICK_KINDS: dict[str, list[str]] = {
     "liq":       ["ts_ms", "sym", "side", "price", "amount"],
     "book_1s":   ["ts", "sym", "bid", "bid_sz", "ask", "ask_sz"],
     "ticker_1m": ["ts", "sym", "last", "mark", "index", "funding", "oi"],
+    # depth_1s: cumulative notional within N bps of mid, per side. MAJORS8
+    # only — depth is an execution question and we execute only there.
+    "depth_1s":  ["ts", "sym", "mid",
+                  "bid_1bp", "bid_5bp", "bid_10bp", "bid_25bp",
+                  "ask_1bp", "ask_5bp", "ask_10bp", "ask_25bp"],
 }
+
+# Ops metadata, not tick data: no `sym` column, so it is deliberately outside
+# TICK_KINDS (load_ticks groups and filters on sym).
+SESSION_COLS = ["ts", "n_symbols", "n_depth_symbols", "free_mb"]
 
 
 # --------------------------------------------------------------------- ticks
@@ -133,6 +142,29 @@ def load_ticks(kind: str = "trades_1s", start: str | None = None,
         unit = "ms" if tcol == "ts_ms" else "s"
         out.index = pd.to_datetime(out[tcol], unit=unit, utc=True)
         out = out.sort_index()
+    return out
+
+
+def load_sessions(start: str | None = None) -> pd.DataFrame:
+    """The collector's own minute heartbeat — makes gaps explicit rather than
+    inferred, and carries free-disk so pressure is visible in hindsight."""
+    frames = []
+    for day in tick_days():
+        if start and day < start:
+            continue
+        d = ticks_root() / day
+        gz, plain = d / "session_1m.csv.gz", d / "session_1m.csv"
+        p = gz if gz.exists() else plain
+        if p.exists():
+            df = _read_csv(p, SESSION_COLS)
+            if not df.empty:
+                frames.append(df)
+    if not frames:
+        return pd.DataFrame(columns=SESSION_COLS)
+    out = pd.concat(frames, ignore_index=True)
+    out["ts"] = pd.to_numeric(out["ts"], errors="coerce")
+    out = out.dropna(subset=["ts"]).sort_values("ts")
+    out.index = pd.to_datetime(out["ts"], unit="s", utc=True)
     return out
 
 
