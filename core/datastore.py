@@ -107,13 +107,20 @@ def load_ticks(kind: str = "trades_1s", start: str | None = None,
         if end and day > end:
             continue
         d = ticks_root() / day
-        for name in (f"{kind}.csv", f"{kind}.csv.gz"):
-            p = d / name
-            if p.exists():
-                df = _read_csv(p, cols)
-                if not df.empty:
-                    df["day"] = day
-                    frames.append(df)
+        # PREFER .gz, never load both. The collector gzips yesterday's file at
+        # UTC midnight and removes the original, but rsync without --delete
+        # leaves the stale .csv behind locally — so a day pulled both before
+        # and after midnight ends up with BOTH files, and loading each gave
+        # ~45% duplicate rows (found 2026-08-07). We deliberately do not use
+        # rsync --delete: the local tree is the redundant copy, and a wiped
+        # box must not be able to wipe it. So the loader resolves it instead.
+        gz, plain = d / f"{kind}.csv.gz", d / f"{kind}.csv"
+        p = gz if gz.exists() else plain
+        if p.exists():
+            df = _read_csv(p, cols)
+            if not df.empty:
+                df["day"] = day
+                frames.append(df)
     if not frames:
         return pd.DataFrame(columns=cols + ["day"])
     out = pd.concat(frames, ignore_index=True)

@@ -117,6 +117,26 @@ def test_tick_days_and_concat():
     print(f"PASS gz+plain concat, truncated line dropped ({len(df)} rows)")
 
 
+def test_gz_preferred_over_stale_plain_csv():
+    """The collector gzips a day at UTC midnight and removes the .csv, but
+    rsync (deliberately no --delete, so a wiped box cannot wipe our copy)
+    leaves the stale .csv behind. Loading BOTH gave ~45% duplicate rows across
+    the whole tick tree on 2026-08-07. The .gz must win."""
+    d = _TMP / "ticks" / "2026-08-04"
+    plain = d / "trades_1s.csv"
+    # same day already has trades_1s.csv.gz with 2 rows; add a stale partial .csv
+    plain.write_text("ts,sym,n,vol,vwap,buy_vol,sell_vol\n"
+                     "1785974400,BTC,10,1.5,62000.0,1.0,0.5\n")
+    try:
+        df = ds.load_ticks("trades_1s", start="2026-08-04", end="2026-08-04")
+        assert len(df) == 2, (f"expected the 2 gz rows, got {len(df)} — the stale "
+                              f".csv was loaded alongside the .csv.gz")
+        assert not df.duplicated(subset=["ts", "sym"]).any()
+        print("PASS .csv.gz wins over a stale sibling .csv (no double-load)")
+    finally:
+        plain.unlink()
+
+
 def test_filters():
     assert len(ds.load_ticks("trades_1s", symbols=["BTC"])) == 2
     assert len(ds.load_ticks("trades_1s", start="2026-08-05")) == 1
@@ -195,6 +215,7 @@ if __name__ == "__main__":
     _build()
     try:
         test_tick_days_and_concat()
+        test_gz_preferred_over_stale_plain_csv()
         test_filters()
         test_missing_is_empty_not_fatal()
         test_liq_uses_ms()

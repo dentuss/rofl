@@ -26,3 +26,5 @@ package-lock.json
 data/
 deploy/hosts.env
 backups/
+logs/
+.cron-sync.lock

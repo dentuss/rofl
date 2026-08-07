@@ -5,7 +5,7 @@ PY  := ./.venv/bin/python
 PIP := ./.venv/bin/pip
 
 .DEFAULT_GOAL := help
-.PHONY: help venv test setup pull ticks live health watch status report backup clean-data
+.PHONY: help venv test setup pull ticks live health watch status report backup prune
 
 help:  ## show this help
 	@echo "rofl — make targets"
@@ -50,9 +50,20 @@ watch:  ## pull on a loop (make watch SECS=120)
 status:  ## show configured hosts, reachability and local sizes
 	@deploy/pull-data.sh status
 
+prune:  ## drop local *.csv where a verified *.csv.gz exists (frees ~75MB/day)
+	@n=0; freed=0; \
+	for gz in data/ticks/*/*.csv.gz; do \
+	  [ -e "$$gz" ] || continue; plain="$${gz%.gz}"; \
+	  if [ -f "$$plain" ] && gzip -t "$$gz" 2>/dev/null; then \
+	    freed=$$((freed + $$(stat -c %s "$$plain"))); rm -f "$$plain"; n=$$((n+1)); \
+	  fi; done; \
+	echo "pruned $$n stale .csv ($$((freed/1024/1024)) MB freed)"
+
 backup:  ## tar the local tick tree (irreplaceable — no backfill exists)
 	@mkdir -p backups && tar czf backups/ticks-$$(date -u +%F).tgz -C data ticks \
-	  && echo "wrote backups/ticks-$$(date -u +%F).tgz"
+	  && echo "wrote backups/ticks-$$(date -u +%F).tgz ($$(du -h backups/ticks-$$(date -u +%F).tgz | cut -f1))"
+	@ls -1t backups/ticks-*.tgz 2>/dev/null | tail -n +8 | xargs -r rm -f
+	@echo "keeping $$(ls -1 backups/ticks-*.tgz 2>/dev/null | wc -l) backup(s)"
 
 # ---------------------------------------------------------------- research
 report:  ## re-run the canonical deploy report (the book's honest numbers)

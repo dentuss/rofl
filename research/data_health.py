@@ -49,19 +49,34 @@ def ticks_report() -> None:
         print("  no tick data yet — has the collector box been pulled?\n")
         return
     print(f"  {len(days)} day-dirs, {days[0]} .. {days[-1]}\n")
-    print(f"  {'day':12s}" + "".join(f"{k:>14s}" for k in TICK_KINDS))
+    print(f"  {'day':12s}" + "".join(f"{k:>14s}" for k in TICK_KINDS) + f"{'window':>16s}")
     nsym = {}
     for day in days:
         line = f"  {day:12s}"
+        span_min = None
         for kind in TICK_KINDS:
             df = load_ticks(kind, start=day, end=day, tz_index=False)
             n = len(df)
             nsym[kind] = df["sym"].nunique() if n else nsym.get(kind, 0)
+            # Coverage is measured against the OBSERVED window, not the
+            # calendar day. The collector started mid-day on its first day and
+            # the current day is always partial, so dividing by 1440 made every
+            # healthy day read 35-60% and would have cried wolf on every cron
+            # run. What we actually want to know is: of the minutes we were
+            # running, how many did we record?
             if kind in EXPECTED_PER_SYM and n and nsym[kind]:
-                pct = 100 * n / (EXPECTED_PER_SYM[kind] * nsym[kind])
-                line += f"{n:>9,}{pct:>4.0f}%"
+                tcol = "ts_ms" if "ts_ms" in df.columns else "ts"
+                t = pd.to_numeric(df[tcol], errors="coerce").dropna()
+                if tcol == "ts_ms":
+                    t = t / 1000.0
+                span = max((t.max() - t.min()) / 60.0, 1.0)
+                if kind == "ticker_1m":
+                    span_min = span
+                expected = span * nsym[kind] * (60 if kind == "book_1s" else 1)
+                line += f"{n:>9,}{100 * n / expected:>4.0f}%"
             else:
                 line += f"{_fmt(n):>14s}"
+        line += f"{(f'{span_min/60:.1f}h' if span_min else '-'):>16s}"
         print(line)
     print(f"\n  symbols seen: " +
           ", ".join(f"{k}={nsym.get(k, 0)}" for k in TICK_KINDS))
@@ -79,10 +94,12 @@ def ticks_report() -> None:
     last = days[-1]
     tk = load_ticks("ticker_1m", start=last, end=last, tz_index=False)
     if len(tk):
-        cov = (tk.groupby("sym").size() / EXPECTED_PER_SYM["ticker_1m"] * 100)
+        t = pd.to_numeric(tk["ts"], errors="coerce").dropna()
+        span = max((t.max() - t.min()) / 60.0, 1.0)   # observed window, see above
+        cov = (tk.groupby("sym").size() / span * 100)
         weak = cov[cov < 80].sort_values()
-        print(f"\n  ticker_1m per-symbol coverage on {last} "
-              f"(median {cov.median():.0f}%):")
+        print(f"\n  ticker_1m per-symbol coverage on {last} over the "
+              f"{span/60:.1f}h observed window (median {cov.median():.0f}%):")
         if len(weak):
             print("    under 80%: " +
                   ", ".join(f"{s} {v:.0f}%" for s, v in weak.items()))
