@@ -231,6 +231,61 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-09 — Venue shopping: the whole gain is on Bybit already
+
+Asked whether a cheaper venue could support a higher-frequency system.
+Re-priced the deployed book across fee scenarios (identical config, fees the
+only variable):
+
+| scenario | CAGR% | Sh(mo) | ΔSh |
+|---|---|---|---|
+| **A. us now** 10.0/3.6 bp | 8.8 | 1.24 | — |
+| **B. Bybit's own published** 5.5/2.0 | 9.5 | **1.33** | **+0.09** |
+| C. Binance / OKX 5.0/2.0 | 9.6 | 1.33 | +0.09 |
+| D. MEXC-like 2.0/0.0 | 10.3 | 1.40 | +0.16 |
+
+**We are paying 1.8× Bybit's own advertised non-VIP rate** (published 0.02% /
+0.055%; we are billed 0.036% / 0.10%, verified across all 831 linear symbols
+and by two live closes). That single discrepancy is worth **+0.09 Sh** — and
+**+0.09 of the total +0.16 available anywhere.**
+
+**Migrating to Binance or OKX is worth ZERO beyond fixing the Bybit tier** —
+identical published fees. The zero-maker venue buys **+0.07 Sh more**, against
+which: a full re-validation (every gate, every backtest and exec parity were
+measured on Bybit data — the same reason the program moved KuCoin→Bybit),
+a materially different counterparty, and the loss of Bybit's free tick+book
+archives on which the entire research capability now depends. **+0.07 Sh does
+not buy that.**
+
+### Does it unlock a higher-frequency system? No.
+
+At MEXC-like costs (~1.5 bp round trip) the measured flow signals (3.5–5.2 bp)
+would net +2 to +3.7 bp, which looks viable until three things are accounted
+for:
+
+1. **The 3.5–5.2 bp is IC-implied**, i.e. `|IC| × σ(fwd)` — an optimistic
+   upper bound on capturable edge, not a backtested return.
+2. **`large_imb`'s IC was NEGATIVE** (−0.034/−0.031). Trading it means FADING
+   flow, a far more crowded posture than following it, and the graveyard
+   already holds CHOP-MR (−1.24) and BB-MR (−0.95).
+3. **Frequency amplifies everything we have not measured** — adverse
+   selection, latency, rate limits, outages. Our ~0 bp measured slippage comes
+   from 4h cadence at $60 clips; it is not evidence about behaviour at 100×
+   the turnover against colocated counterparties.
+
+Fee drag today is ~1.7pp of a ~10.5pp gross CAGR — **~16% of gross**.
+Meaningful, not dominant. Cost scales linearly with turnover, so a 10× more
+frequent book needs >10× the gross edge to come out ahead. Nothing measured
+supports that.
+
+**Where rebates genuinely change the business is market MAKING itself** (Bitget
+advertises −0.005% maker on ~130 perps; Bybit MM 3 is −0.0075%). That is one of
+the three untested taxonomy types — and it is a different business needing
+latency and quoting infrastructure, not a fee tweak to this one.
+
+**Action: one support question to Bybit about the rate. It is worth more than
+any venue migration, and it costs nothing.**
+
 ## 2026-08-09 — Why quants harvest edges we cannot: the fee ladder, from the ground up
 
 Asked why big firms trade the 3–8 bp signals our cost floor kills. Answered
