@@ -231,6 +231,53 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-09 — Bybit publishes free L2 order book. I was wrong yesterday.
+
+Yesterday I checked `public.bybit.com/orderbook/`, got a 404, and concluded
+the order book was not available free. **It is** — on a different host, which
+a single 404 was never sufficient evidence to rule out.
+
+**VERIFIED, not claimed** (HEAD/GET probes, 2026-08-09):
+
+| dataset | source | history | size |
+|---|---|---|---|
+| tick trades | `public.bybit.com/trading/{SYM}/{SYM}{DATE}.csv.gz` | **2020-03-25 → now (6.4y)** | BTC 46 MB/day |
+| **L2 book, 200 lvl @200ms** | `quote-saver.bycsi.com/orderbook/linear/{SYM}/{DATE}_{SYM}_ob200.data.zip` | **~2025-09-01 → now (~11mo)** | MAJORS8 322 MB/day = **118 GB/yr** |
+| liquidations | **nowhere free** | — | our collector is the only source |
+
+Boundaries established by bisection rather than taken from the claim that
+prompted the search: 2025-08-01 is a 404, all of 2025-09 is present, so the
+book archive is **~11 months, not the "2+ years" asserted**. The `ob500` and
+`.zst` variants do not exist; only `ob200` zip.
+
+Format is the **raw WebSocket feed** — JSONL, one `snapshot` then `delta`s
+(`{"topic":"orderbook.200.SYM","type":...,"ts":<ms>,"data":{"b":[[px,sz]],"a":[...]}}`),
+18 MB zipped → 122 MB raw for one AVAX day. Snapshot+deltas means the book can
+be **replayed exactly**, so this is Tardis-equivalent for the book — for 11
+months, free.
+
+**Disk is the binding constraint, not bandwidth.** 118 GB/yr does not fit the
+collector box (41 GB free). `core/bybit_archive.py` therefore never stores a
+raw day: download → extract only the requested decision points → discard.
+Measured on a real day: **1.66 MB cached from ~130 MB of archive.**
+
+**End-to-end proof on our own ADA entry** (2026-08-06 12:00 bar, maker limit
+0.1923, 260 ADA): the book reconstructs to 200 levels a side with
+$849k resting on the bid, and **21,747,428 ADA traded through our limit during
+the bar — 83,644× our order size**. The fill was never marginal, and this is
+now measured rather than assumed.
+
+**What it changes.** The `maker_fill_min_bp` ladder (2026-08-08) picked 1/2/5/10
+bp because nothing better existed; the fill question can now be answered from
+data. Trade-flow/CVD work has 6.4 years available immediately. Book-imbalance
+work has 11 months. Liquidation-cascade work still depends entirely on the
+collector — which is the strongest argument yet for never letting it stop.
+
+**The honest caveat for any fill model built on this:** the book archive covers
+2025-09 onward, i.e. only the last ~30% of the 2023-08→2026-08 backtest window.
+A relationship calibrated there and applied to 2023–2024 is an EXTRAPOLATION,
+and must be labelled as one.
+
 ## 2026-08-08 — Maker-fill fragility: the edge does NOT rest on marginal touches
 
 Pre-registered fragility test (`research/maker_fill_depth.py`), prompted by
