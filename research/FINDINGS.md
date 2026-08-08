@@ -231,6 +231,51 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-09 — FILL CALIBRATION: the engine's optimistic fill assumption VALIDATED
+
+The measurement the guessed `maker_fill_min_bp` ladder was standing in for.
+Pre-registered before the first download (`research/fill_calibration.py`).
+
+A passive order at price P fills once the volume trading through P exceeds the
+QUEUE AHEAD of it. Both terms are now observable from Bybit's free archives:
+**Q** = resting size at the limit when the bar opens (ob200 book), **V** =
+volume traded at/through the limit during the bar (tick trades), **S** = our
+own order size.
+
+**Sample (fixed in advance):** N=64, eight per pair, `default_rng(20260809)`,
+drawn from the 359 engine entries falling in the book-archive overlap
+(2025-09-01→now). Stratified so no liquid name dominates; seeded so the draw
+cannot be re-rolled toward a nicer answer. A census would be ~21 GB.
+
+| criterion | pass | fail |
+|---|---|---|
+| C1 lenient `V ≥ Q` | **64/64 (100%)** | 0% |
+| C2 strict `V ≥ Q+S` | **64/64 (100%)** | 0% |
+| C3 paranoid `V ≥ 2(Q+S)` | **64/64 (100%)** | 0% |
+
+Coverage ratio `V/(Q+S)`: **median 2,233×**, p10 111×, p5 36×, p1 3.6×,
+**minimum 2.26×**. Our order is a median **0.43% of the queue ahead of it**.
+
+**Every sampled entry clears even the paranoid criterion, and the WORST case
+still had 2.26× the volume required.** The engine's "any penetration fills"
+assumption is not merely tolerable — on this sample it is never the binding
+constraint. The fills the backtest books are fills that had the volume to
+happen.
+
+**This retires the fragility question, in the direction of the book being
+sound.** The 2026-08-08 ladder measured ≤0.15 Sh of exposure to the assumption
+and could not say whether that exposure was real; it now looks like headroom
+rather than risk. `maker_fill_min_bp` stays at its 0.0 default — the knob keeps
+its value as a stress lever, not as a correction.
+
+**Scope, stated before running and unchanged after:** the book archive begins
+2025-09, i.e. the last ~30% of the 2023-08→2026-08 window. This is evidence
+about 2025-2026 only. It says NOTHING about 2023-2024, when the book was
+thinner and our size a larger share of it — applying it there is extrapolation.
+Also n=64 of 359, and only entries the engine actually took (fills it rejected
+are not in the sample, so this measures whether booked fills were real, not
+whether missed fills should have filled).
+
 ## 2026-08-09 — Bybit publishes free L2 order book. I was wrong yesterday.
 
 Yesterday I checked `public.bybit.com/orderbook/`, got a 404, and concluded
