@@ -231,6 +231,49 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-08 — Tick data: measurement only, and the first fill-quality numbers
+
+Asked whether the tick record can feed the live system. Answered three ways,
+and only one of them is open:
+
+* **As a SIGNAL — no.** Blocked by A3 (tier-2 at ~60 days; we have 3). More
+  fundamentally *mismatched*: the book decides on a 4h clock ~40x/leg/year,
+  while tick information has a horizon of seconds.
+* **As an EXECUTION input — not directly, and this is the subtle one.** The
+  engine prices `maker_close` (limit at the signal bar's close, strict
+  penetration, a miss is missed), and **G5 exec parity is what makes the edge
+  estimate mean anything**. Smarter live placement using live book state would
+  stop live matching the engine — trading a measurable edge for an
+  unmeasurable one. Order must be engine-first: model, gate, then wire. Also
+  architectural: the boxes are isolated so trading churn can never threaten
+  the tick record; piping ticks to the money box reverses that.
+* **As MEASUREMENT — yes**, and it closes the open Phase 2 item ("replace the
+  flat 2 bps assumption with measured per-pair values") with no live change
+  and no gate broken.
+
+`research/fill_quality.py` joins the live blotter to book_1s/depth_1s. First
+two fills (both `sl-external`, taker market):
+
+| leg | notional | spread bp | top-of-book | our size | slip bp |
+|---|---|---|---|---|---|
+| doge-t | $81.01 | 1.42 | $8,848 | **0.92%** | +0.15 |
+| xrp-t | $72.05 | 0.96 | $25,538 | **0.28%** | −1.84 |
+
+**Measured slippage: median −0.85 bp against a modelled +2.0 bp charge** — the
+model is conservative. **NOT acted on**: n=2, both stops, both mid-depth
+names, none in stress. Lowering a cost on this is exactly the flattering
+adjustment the ledger exists to prevent. Revisit at n≥30 spanning TP (maker)
+and SL (taker).
+
+**Useful correction to the 2026-08-07 depth worry.** That analysis used p5
+top-of-book — a tail statistic — and flagged LINK/AVAX. At these actual fills
+top-of-book was $8.8k/$25.5k and our order was **under 1%** of it. The p5 case
+is real but did not materialise here; thin-name stops remain untested. The
+honest reading is that depth risk is a tail concern, not a routine one.
+
+Now runs in the daily cron so the record accumulates rather than being
+re-derived by hand.
+
 ## ⚠ 2026-08-08 — FEES ARE ~2x THE MODEL: every absolute number was too cheap
 
 The first two live stops closed and Bybit's closed-PnL gave ground truth for

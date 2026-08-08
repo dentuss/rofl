@@ -65,6 +65,8 @@ run() {
             # pure duplication (~75 MB/day) and would double the tarball.
             make prune || rc=$?
             make backup || rc=$?
+            say "--- fill quality (L2 slippage/depth record) ---"
+            PYTHONIOENCODING=utf-8 ./.venv/bin/python research/fill_quality.py || true
             say "--- sleeve forward trackers ---"
             XS_ANCHOR=2026-07-09 PYTHONIOENCODING=utf-8 ./.venv/bin/python xs_paper.py || rc=$?
             SLEEVES_ANCHOR=2026-07-05 PYTHONIOENCODING=utf-8 ./.venv/bin/python sleeves_paper.py || rc=$?
