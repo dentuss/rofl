@@ -231,6 +231,70 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-09 — Why quants harvest edges we cannot: the fee ladder, from the ground up
+
+Asked why big firms trade the 3–8 bp signals our cost floor kills. Answered
+from Bybit's own `GET /v5/market/fee-group-info` rather than from theory. It is
+not signals, infrastructure or cleverness — **it is a published fee ladder we
+sit at the bottom of.**
+
+G1 "Major Coins" (BTCUSDT, ETHUSDT, XRPUSDT, SOLUSDT — three of ours). Round
+trip = maker in + our measured exit mix (23.6% maker TP / 76.4% taker):
+
+| tier | maker bp | taker bp | round trip | vs us |
+|---|---|---|---|---|
+| **us (no tier)** | **3.60** | **10.00** | **12.09 bp** | 100% |
+| Pro 1 | 1.00 | 2.80 | 3.38 bp | 28% |
+| Pro 3 | 0.25 | 2.20 | 1.99 bp | 16% |
+| Pro 6 | 0.00 | 1.50 | 1.15 bp | 9% |
+| **MM 3** | **−0.75 (rebate)** | 2.80 | 1.21 bp | 10% |
+
+**Market makers are PAID to provide liquidity** (`makerRebate: -0.000075`).
+That is the structural answer: our 4.9 bp `large_imb` signal nets **−7.19 bp**
+for us, **+1.52 bp** at Pro 1 and **+3.75 bp** at Pro 6. *Identical signal,
+identical data — the tier decides whether it is an edge or a loss.*
+
+**And it is unreachable, precisely.** Our traded volume is ~**$6,400/month**
+(640 trades/yr × ~$60 × 2 sides). Pro 1 needs on the order of $10M/month —
+we are **~1,562× short**, equivalent to a **~$2.8M book**. No optimisation on
+our side closes a 1,500× volume gap. Chasing it is not a plan.
+
+### The reframe that actually matters
+
+**The cost floor is nearly irrelevant to THIS strategy, and fatal only to
+tick-scale ones.** With a 1.8-ATR stop, 1R is 200–400 bp of notional:
+
+| stop | 1R | RT 12.1 bp as % of 1R | as % of the avg +3.33R win |
+|---|---|---|---|
+| 2% | 200 bp | 6.0% | 1.8% |
+| 3% | 300 bp | 4.0% | 1.2% |
+| 4% | 400 bp | 3.0% | 0.9% |
+
+Confirmed empirically by the re-pricing: +4 bp of round trip (8→12.1) cost
+**0.08 Sharpe**. Extrapolating, reaching Pro 1 would be worth roughly **+0.17
+Sh** — real, but not transformative, and unavailable.
+
+**So the existing design already IS the answer to the cost problem.** A 4h
+trend book targeting 6-ATR moves doesn't fight the floor, it steps over it.
+That was arguably the single most important structural decision in the
+program, and this is the first time it has been quantified as such.
+
+### What is actually actionable (small, in order)
+
+1. **Confirm 10.0/3.6 is the correct standard rate for a no-VIP UTA account.**
+   Bybit publishes lower non-VIP derivative figures; four distinct schedules
+   exist on this very account (a promo tier of 2.75 bp taker / **0 maker** runs
+   on 178 TOKENISED EQUITY symbols — AMZN, ORCL, HOOD — irrelevant to us and
+   barred by the structural-universe law anyway). One support question. If a
+   standard tier applies, it is worth more than every code optimisation here.
+2. **Referral discount** — `inviterID: 0`, so none is applied. Typically only
+   available at account creation; worth knowing for any future account.
+3. **Turnover** is the only lever we control: cost scales linearly with trades.
+   That is a strategy change and owes the gate battery.
+4. **NOT the SL-as-maker idea.** A stop resting as a limit can fail to fill in
+   exactly the gap it exists to protect against. The taker stop is a
+   deliberate, correct choice and should not be traded away for 6 bp.
+
 ## 2026-08-09 — TRADE-FLOW REJECTED on 6.4 years: real information, below the cost floor
 
 The first study the tick archives unblocked, and it independently reproduces
