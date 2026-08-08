@@ -231,6 +231,49 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-09 — TRADE-FLOW REJECTED on 6.4 years: real information, below the cost floor
+
+The first study the tick archives unblocked, and it independently reproduces
+the tier-1 moonshot conclusion on new data. Pre-registered IC screen
+(`research/tradeflow_ic.py`), modelled on `funding_signal.py` — measure the
+information before writing a strategy, so a dead idea dies cheaply.
+
+Four features, one parameterisation each, fixed before the first download:
+`cvd_bar`, `cvd_6bar`, `large_imb` (trades ≥ 95th pct size, per symbol-day),
+`count_imb`. Target: NEXT 4h bar return. Sample: BTCUSDT + ETHUSDT, every 20th
+day 2020-03-25 → 2026-08-08 (117 days, ~700 bars, 529 usable forward returns
+per symbol — days are disjoint, so cross-day forward returns are dropped).
+
+| feature | IC next (BTC / ETH) | IC same-bar (BTC / ETH) | implied edge |
+|---|---|---|---|
+| cvd_bar | −0.014 / −0.038 | **+0.418 / +0.393** | 3.9 bp |
+| cvd_6bar | +0.047 / −0.001 | +0.146 / +0.107 | 3.5 bp |
+| large_imb | −0.034 / −0.031 | **+0.360 / +0.347** | 4.9 bp |
+| count_imb | −0.025 / −0.044 | **+0.348 / +0.326** | 5.2 bp |
+
+**NO CELL CLEARS THE BAR** (|IC| ≥ 0.03, consistent sign, edge > 13.6 bp).
+
+**The same-bar column is the point.** Contemporaneous IC of **+0.33 to +0.42**
+proves the features are computed correctly and genuinely measure aggressive
+flow — price and flow move together mechanically within a bar. Next-bar IC
+collapses to ≈0 and is mostly *negative*. Had the same-bar control also been
+flat I would suspect a bug; it isn't, so the null is about the world rather
+than the code. That control is why it is in the design.
+
+**Implied edge 3.5–5.2 bp against a 13.6 bp measured round trip** — roughly 3×
+below the floor. The tier-1 battery concluded "the signals exist (lead-lag
+gross +3–8bp, real) but are 3–7× below our cost floor; the moat is execution
+cost, not signal discovery." **This lands squarely in that band, on a
+different dataset, six weeks later.** That is replication, not coincidence,
+and it is the strongest evidence yet that the conclusion is structural.
+
+The mild NEGATIVE next-bar IC also fits the existing graveyard: fading does not
+work either (CHOP-MR −1.24, BB-MR −0.95).
+
+**No backtest is owed and none was run.** ~270 GB of downloads saved by
+screening first. "Order Flow" moves from the tick-gated column of the
+2026-08-03 taxonomy triage to the dead column.
+
 ## 2026-08-09 — FILL CALIBRATION: the engine's optimistic fill assumption VALIDATED
 
 The measurement the guessed `maker_fill_min_bp` ladder was standing in for.
