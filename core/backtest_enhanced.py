@@ -61,6 +61,22 @@ class EnhancedBTConfig(BTConfig):
     # on a same-bar SL+TP collision is unchanged. Maker entries still never
     # credit a same-bar TP. UNDER VALIDATION (research/tp_limit.py).
     tp_as_limit: bool = False
+    # Minimum penetration (in bp of the limit price) before a resting maker
+    # order is considered FILLED. 0.0 = the historical behaviour: ANY
+    # penetration fills, however small.
+    #
+    # Physically, a resting order fills only once enough volume trades PAST
+    # your price to clear the queue ahead of you. A 0.01 bp penetration means
+    # almost nothing traded past you, so counting it as a fill is the most
+    # optimistic assumption available — and it is why the adopted stack
+    # reports only 6/1048 missed fills. This knob makes that assumption
+    # TESTABLE rather than implicit.
+    #
+    # DEFAULT 0.0 PRESERVES EVERY PRIOR RESULT. Raising it can only remove
+    # fills, never add them, so it is a fragility test in the safe direction:
+    # it can lower the measured edge but never inflate it.
+    # (research/maker_fill_depth.py, 2026-08-08)
+    maker_fill_min_bp: float = 0.0
 
 
 def _slip(p, side, slip_bps, is_entry):
@@ -233,8 +249,13 @@ def run_backtest_enhanced(price_df: pd.DataFrame, sig_df: pd.DataFrame,
                 maker = cfg.entry_style == "maker_close"
                 if maker:
                     lim = row["close_prev"]
+                    # Require the bar to trade through the limit by at least
+                    # maker_fill_min_bp — a queue-position proxy. At 0.0 this
+                    # is exactly the historical strict-penetration test.
+                    pen = cfg.maker_fill_min_bp / 1e4
                     fill_ok = bool(pd.notna(lim)) and \
-                        ((l < lim) if sig_next == 1 else (h > lim))
+                        ((l < lim * (1 - pen)) if sig_next == 1
+                         else (h > lim * (1 + pen)))
                     entry_fill = float(lim) if fill_ok else 1.0
                     entry_fee_rate = cfg.fee_maker
                 else:

@@ -231,6 +231,52 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-08 — Maker-fill fragility: the edge does NOT rest on marginal touches
+
+Pre-registered fragility test (`research/maker_fill_depth.py`), prompted by
+asking for a book-aware entry model. A real book-consuming model is **not
+buildable yet** — 3 days of book data against a 3-year window would be fitting
+noise. What IS answerable now is how much of the edge depends on the engine's
+most optimistic assumption:
+
+    fill_ok = (low < limit) if long else (high > limit)   # ANY penetration
+
+That is why FINDINGS reports "only 6/1048 fills missed" — the number is a
+*consequence* of the assumption, not evidence for it. New engine knob
+`maker_fill_min_bp` requires the bar to penetrate by at least X bp before a
+resting order counts as filled. **Default 0.0 preserves every prior number**,
+and raising it can only REMOVE fills — so no cell can flatter the book.
+
+| cell | trades | CAGR% | Sh(mo) | ΔSh | IS | OOS |
+|---|---|---|---|---|---|---|
+| **F0 0.0 bp (control)** | 1916 | 8.5 | **1.23** | — | 1.37 | 1.05 |
+| F1 1.0 bp | 1916 | 8.0 | 1.17 | −0.06 | 1.27 | 1.04 |
+| F2 2.0 bp | 1916 | 8.0 | 1.17 | −0.06 | 1.27 | 1.04 |
+| F5 5.0 bp | 1914 | 7.9 | 1.16 | −0.07 | 1.20 | 1.09 |
+| F10 10.0 bp | 1914 | 7.0 | 1.08 | −0.15 | 1.11 | 1.02 |
+
+**The reassuring part — realised penetration on filling bars (n=21,502):**
+
+| pct | 1 | 5 | 10 | 25 | 50 | 75 | 95 |
+|---|---|---|---|---|---|---|---|
+| bp | 2.4 | 9.5 | 17.2 | 40.4 | **87.0** | 165.3 | 379.8 |
+
+Median penetration is **87 bp** — ~17× ADA's one-tick spread and ~4,000× BTC's.
+Only **0.3%** of filling bars penetrate under 1 bp; 5.3% under 10 bp. The
+marginal-touch case the assumption is most generous about is *rare*, and even
+a 10 bp gate (well beyond one tick on every major) costs just **0.15 Sh**.
+
+**Mechanism worth noting: trade COUNT barely moves (1916 → 1914).** A blocked
+entry is not a lost trade — a persisting signal simply retries next bar. The
+cost is a worse entry PRICE, not a missing position, which is why CAGR falls
+while the count holds.
+
+**Nothing promoted, and the default stays 0.0.** No cell here is more *correct*
+than the control: we do not know the true fill threshold, so this bounds
+exposure rather than measuring it. What it establishes is that the adopted
+stack is not quietly living on fills that never happened — which was the real
+worry, and it is now bounded at ≤0.15 Sh across a deliberately harsh ladder.
+
 ## 2026-08-08 — Tick data: measurement only, and the first fill-quality numbers
 
 Asked whether the tick record can feed the live system. Answered three ways,
