@@ -55,10 +55,18 @@ percentages are deposit-invariant, dollars shown on $1,800):
 
 | sizing | CAGR | Sh(mo) | dMDD | worst mo | median mo | final $ |
 |---|---|---|---|---|---|---|
-| **unit weights (L1/L2 runs here)** | 9.5% | 1.33 | −5.6% | −3.6% | +0.35% | 2,358 |
+| **unit weights (L1/L2 runs here)** | **8.5%** | **1.23** | −5.6% | −3.6% | — | 2,294 |
 | @15% vol dial (L3, ×2.1) | 20.3% | 1.32 | −11.4% | −7.5% | +0.74% | 3,112 |
 | @25% vol dial (L3, ×3.5) | 34.4% | 1.32 | −18.3% | −12.2% | +1.23% | 4,322 |
 
+> **Re-priced 2026-08-08 at MEASURED fees** (taker 10.0 bp / maker 3.6 bp from
+> `GET /v5/account/fee-rate`, confirmed by the first two closes — the model's
+> 6.0/2.0 were Bybit's published non-VIP rates and are ~2× too cheap for this
+> account). `research/refee.py`: 9.2 → **8.5% CAGR**, Sh 1.31 → **1.23**,
+> OOS 1.14 → **1.05**. ΔSh −0.08 is INSIDE the pre-registered 0.2 L2 halt
+> tolerance, so no halt — but every absolute number produced before this date
+> is priced too cheaply. The dial rows below are NOT yet re-priced.
+>
 > **Re-measured 2026-08-03** (`deploy_report.py`, unmodified, on the Linux box;
 > 36 monthly obs, 21 positive). The previous row — 10.4% / 1.50 / −4.5% /
 > −1.7% — was written 2026-07-30, **mid-month, before July 2026 closed at

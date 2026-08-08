@@ -231,6 +231,72 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## ⚠ 2026-08-08 — FEES ARE ~2x THE MODEL: every absolute number was too cheap
+
+The first two live stops closed and Bybit's closed-PnL gave ground truth for
+the first time. **The cost model has always been wrong about fees.**
+
+| | model | **measured** | ratio |
+|---|---|---|---|
+| maker | 2.0 bp | **3.60 bp** | 1.8× |
+| taker | 6.0 bp | **10.00 bp** | 1.67× |
+
+Derived identically from both closes — XRP `openFee 0.02594 / 72.0473` and
+DOGE `0.02916 / 81.0074` are each exactly 3.60 bp; both `closeFee` ratios are
+exactly 10.00 bp — and confirmed outright by `GET /v5/account/fee-rate`:
+`takerFeeRate 0.001`, `makerFeeRate 0.00036`. The old 6/2 were Bybit's
+published *non-VIP* figures; they are simply not this account's rates.
+
+**RE-PRICED (`research/refee.py`, identical config, fees the only change):**
+
+| cell | CAGR% | Sh(mo) | dMDD% | worst mo% | IS | OOS |
+|---|---|---|---|---|---|---|
+| MODEL 6.0/2.0 bp | 9.2 | 1.31 | −5.6 | −3.6 | 1.44 | 1.14 |
+| **MEASURED 10.0/3.6 bp** | **8.5** | **1.23** | −5.6 | −3.6 | 1.37 | **1.05** |
+
+**L2 COST GATE: ΔSh −0.08, ΔCAGR −0.7pp — INSIDE the pre-registered 0.2 Sh
+tolerance. No halt.** Recorded because the gate answering "no" on measurement
+is the gate working, not a reason to stop measuring. Note OOS falls to **1.05**
+— the thinnest it has been.
+
+**Consequences.** (1) Quote **8.5% / 1.23** for sizing, not 9.5/1.33 and
+certainly not the original 10.4/1.50. (2) Every absolute number in this file
+produced before today is priced ~2x too cheaply on fees and is optimistic by
+roughly this much; relative rankings between variants are largely preserved
+because the change is common to all of them. (3) `cost_engine.FEE_TAKER/
+FEE_MAKER` now default to the measured rates (env-overridable — they are
+per-account and move with VIP tier).
+
+**Root-cause fix, not a constant patch:** `bot.py` now calls
+`Exchange.refresh_fee_rates()` at startup and reads the account's real rates
+from the venue before anything can be booked, falling back to constants only
+on failure. Rates change with tier; asking beats assuming. Guarded by
+`test_fee_booking.py`.
+
+## 2026-08-08 — First two exits: the live-vs-engine reconcile, and it is clean
+
+The first fills to complete a round trip. Both `-t` shorts, both stopped out.
+
+| leg | entry | exit | exchange PnL | bot booked | delta | R |
+|---|---|---|---|---|---|---|
+| doge-t | 0.06906 | 0.07048 | −1.7573 | −1.7315 | +0.026 | −1.03 |
+| xrp-t | 1.02050 | 1.04360 | −1.7301 | −1.6895 | +0.041 | −1.02 |
+
+**Exit prices match the exchange EXACTLY.** `fetch_last_closed_fill` worked:
+the bot booked the real fill, not the theoretical SL. Visible in xrp — the SL
+trigger was 1.0438 and the booked exit is 1.0436, i.e. the actual fill, which
+is what the whole method exists to capture.
+
+**Slippage ≈ 0.** DOGE filled exactly at its 0.07048 trigger; XRP filled at
+1.0436 against a 1.0438 trigger — marginally *favourable*. Both stops came in
+at −1.02/−1.03 R, i.e. 1R plus fees and nothing else. On n=2 this is weak
+evidence, but it is evidence *against* the LINK/AVAX depth worry mattering at
+this size — and DOGE/XRP are mid-depth names, so the thin ones are still
+untested.
+
+**The +0.067 total booking gap is entirely the fee constants**, now fixed
+above. Nothing else in the reconcile diverges.
+
 ## 2026-08-07 — Full-bot audit: three findings, two non-findings
 
 A deliberate sweep of the money paths, risk controls and program state rather

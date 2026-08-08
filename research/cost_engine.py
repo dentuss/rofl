@@ -45,8 +45,18 @@ DAYS = int(_os.environ.get("DAYS", 2000))
 WARMUP_D = 365
 BPD = 6
 FNG_BARS = 3 * BPD
-FEE_TAKER = 0.0006
-FEE_MAKER = 0.0002
+# MEASURED on the live account 2026-08-08 (first two closes + GET
+# /v5/account/fee-rate: takerFeeRate 0.001, makerFeeRate 0.00036). The old
+# 0.0006/0.0002 were Bybit's published non-VIP figures and were ~2x optimistic
+# for this account — so EVERY absolute number in FINDINGS produced before
+# 2026-08-08 is priced too cheaply. Re-pricing the deployed book moved it
+# 9.2 -> 8.5% CAGR and Sh 1.31 -> 1.23 (research/refee.py): real, and inside
+# the pre-registered 0.2 Sh L2 halt tolerance.
+#
+# Rates are PER ACCOUNT and move with VIP tier — override via env rather than
+# editing, and re-measure if the tier changes. bot.py asks the venue directly.
+FEE_TAKER = float(_os.environ.get("FEE_TAKER", 0.0010))
+FEE_MAKER = float(_os.environ.get("FEE_MAKER", 0.00036))
 
 # cell -> (entry_bar_check, entry_style, funding)   funding in {"flat","real"}
 CELLS = {

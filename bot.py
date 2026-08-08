@@ -519,6 +519,8 @@ class Exchange:
         self.cfg = cfg
         self.log = log
         self.paper = cfg.mode == "paper"
+        # Overridden from the venue at startup in live mode (refresh_fee_rates).
+        self.fee_taker, self.fee_maker = FEE_TAKER, FEE_MAKER
         try:
             import ccxt
         except ImportError:
@@ -743,6 +745,42 @@ class Exchange:
                 self._ccxt_symbol(), qty, px, params=self._ccxt_params(params))
         return self._ccxt.create_limit_sell_order(
             self._ccxt_symbol(), qty, px, params=self._ccxt_params(params))
+
+    def refresh_fee_rates(self) -> None:
+        """Read this ACCOUNT's real maker/taker rates from Bybit.
+
+        The hardcoded 6bp/2bp were Bybit's published non-VIP numbers and were
+        simply wrong for this account: the first two live closes (2026-08-08)
+        billed 3.60 bp maker / 10.00 bp taker, and GET /v5/account/fee-rate
+        confirms takerFeeRate 0.001 / makerFeeRate 0.00036 — roughly 2x the
+        assumption, on every trade since inception.
+
+        Fee rates are per-account and move with VIP tier, so ASKING beats
+        assuming: this removes the whole class of error rather than patching
+        today's numbers. Falls back to the constants if the call fails; live
+        only (paper keeps the constants for engine parity)."""
+        if self.paper or self._ccxt is None:
+            return
+        try:
+            r = self._ccxt.private_get_v5_account_fee_rate(
+                self._ccxt_params({"category": "linear",
+                                   "symbol": self._ccxt_market_id()}))
+            row = ((r.get("result") or {}).get("list") or [{}])[0]
+            taker, maker = float(row.get("takerFeeRate") or 0), float(row.get("makerFeeRate") or 0)
+            if taker > 0 and maker > 0:
+                if abs(taker - self.fee_taker) > 1e-9 or abs(maker - self.fee_maker) > 1e-9:
+                    self.log.warning(
+                        f"fee rates from exchange: taker {taker*1e4:.2f}bp "
+                        f"maker {maker*1e4:.2f}bp (were {self.fee_taker*1e4:.2f}/"
+                        f"{self.fee_maker*1e4:.2f}) — booking updated")
+                self.fee_taker, self.fee_maker = taker, maker
+        except Exception as e:
+            self.log.warning(f"fee-rate fetch failed ({e}); keeping "
+                             f"{self.fee_taker*1e4:.2f}/{self.fee_maker*1e4:.2f}bp")
+
+    def _ccxt_market_id(self) -> str:
+        m = self._load_market() or {}
+        return m.get("id") or self.cfg.symbol.replace("/", "")
 
     def fetch_order_status(self, order_id: str) -> dict:
         """Normalized order status: {status: open|closed|canceled|rejected|
@@ -1724,10 +1762,10 @@ class Bot:
         #    exchange had already flattened us — i.e. the TP limit filled. A
         #    bot-initiated market close on a "tp" reason is still taker. Paper
         #    has no resting order, so it mirrors the engine's tp_as_limit.
-        entry_rate = FEE_MAKER if getattr(pos, "maker_entry", False) else FEE_TAKER
+        entry_rate = self.ex.fee_maker if getattr(pos, "maker_entry", False) else self.ex.fee_taker
         exit_maker = (self.cfg.tp_limit_orders and reason.startswith("tp")
                       and (order is None or self.ex.paper))
-        exit_rate = FEE_MAKER if exit_maker else FEE_TAKER
+        exit_rate = self.ex.fee_maker if exit_maker else self.ex.fee_taker
         fees = pos.notional * entry_rate + fill_px * pos.qty * exit_rate
         pnl = gross - fees
         pct = (pnl / pos.notional * 100) if pos.notional else 0.0
@@ -1999,6 +2037,9 @@ class Bot:
                 except Exception: pass
                 raise SystemExit(2)
             self.log.info(f"LIVE balance check OK: {bal:.2f} USDT on exchange")
+            # Ask the venue for this account's real maker/taker rates before
+            # any trade can be booked against the assumed ones.
+            self.ex.refresh_fee_rates()
             # Warm the market-metadata cache now so the FIRST entry doesn't race
             # ccxt's symbol resolution to the spot market (the "attached stopLoss
             # not supported for spot market orders" failure seen on a cold start).

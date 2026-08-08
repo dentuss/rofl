@@ -35,6 +35,9 @@ os.environ.update({
 
 import bot as botmod  # noqa: E402
 
+# The rates the Exchange defaults to before refresh_fee_rates() runs. The
+# LIVE account measured 10.0/3.6 bp on 2026-08-08 — which is why the bot now
+# asks the venue instead of trusting a constant.
 TAKER, MAKER = 0.0006, 0.0002
 
 
@@ -108,6 +111,7 @@ def _run(tp_limit, entry_limit, maker_entry, reason, reject_close, exit_px):
     # is FLAT, which is exactly why the reduce-only close gets rejected.
     b = _bot(tp_limit, entry_limit, net=0.0 if reject_close else qty,
              reject_close=reject_close)
+    b.ex.fee_taker, b.ex.fee_maker = TAKER, MAKER   # pin; no venue call in test
     eq0 = b.state.equity
     b.state.position = botmod.Position(side=1, qty=qty, entry_px=entry_px,
                                        sl=98.0, tp=106.0, open_ts=0,
@@ -161,6 +165,22 @@ def test_round_trip_saving_is_material():
           f"({(old-f)/n*1e4:.0f}bp of notional recovered)")
 
 
+def test_bot_asks_the_venue_for_fee_rates():
+    """2026-08-08: hardcoded 6/2 bp were ~2x optimistic for this account
+    (real: 10.0/3.6). Rates are per-account and move with VIP tier, so the
+    bot must ASK rather than assume — otherwise the same class of error
+    returns silently the next time the tier changes."""
+    import inspect
+    assert hasattr(botmod.Exchange, "refresh_fee_rates"), \
+        "Exchange must be able to read its own fee rates"
+    src = inspect.getsource(botmod.Bot.run)
+    assert "refresh_fee_rates" in src, \
+        "refresh_fee_rates must be called at startup, before anything is booked"
+    ex_src = inspect.getsource(botmod.Exchange.refresh_fee_rates)
+    assert "fee_rate" in ex_src or "fee-rate" in ex_src
+    print("PASS bot reads its own fee rates from the venue at startup")
+
+
 if __name__ == "__main__":
     test_taker_in_taker_out()
     test_maker_in_taker_out()
@@ -168,4 +188,5 @@ if __name__ == "__main__":
     test_bot_initiated_tp_is_taker()
     test_sl_never_maker()
     test_round_trip_saving_is_material()
+    test_bot_asks_the_venue_for_fee_rates()
     print("\nAll fee-booking tests passed.")

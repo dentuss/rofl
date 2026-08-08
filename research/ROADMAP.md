@@ -10,7 +10,10 @@ the full cost model — no exceptions.**
 
 ## Standing rules (apply to every experiment)
 
-1. **Cost model is mandatory**: taker fee 0.06%/side, slippage 2 bps/side,
+1. **Cost model is mandatory**: taker fee **0.10%/side, maker 0.036%/side**
+   (MEASURED on the live account 2026-08-08; the old 0.06%/0.02% were Bybit's
+   published non-VIP rates and ~2× too cheap here — see FINDINGS. Per-account
+   and VIP-dependent: re-measure if the tier changes), slippage 2 bps/side
    funding modeled (flat 1 bp/8h until Phase 2 upgrades it to real per-pair
    funding series — after that, real series only). Any new cost discovered in
    paper/live (spread, partial fills, min-notional rounding) gets added here.
@@ -41,9 +44,13 @@ the full cost model — no exceptions.**
   CPU / 120 MB of 2 GB, 41 GB free.
 - Capital **$1,798.43**, split correctly after L0.5: main **$899.86**, sub
   **$898.57**, both in UNIFIED.
-- Book re-measured 2026-08-03: **CAGR 9.5%, Sh(mo) 1.33, dMDD −5.6%, worst
-  month −3.6%** at unit weights (the older 10.4/1.50/−4.5/−1.7 predates July
-  2026 closing at −3.64%).
+- Book at **MEASURED fees** (2026-08-08): **CAGR 8.5%, Sh(mo) 1.23, dMDD
+  −5.6%, worst month −3.6%**, IS 1.37 → OOS 1.05. The 9.5/1.33 row was the
+  same book priced at the model's too-cheap 6/2 bp; 10.4/1.50 predates July
+  2026 as well. **Quote 8.5/1.23.**
+- **First two exits reconciled clean** (2026-08-08): both stops booked the
+  exchange's exact fill, slippage ≈0, −1.02/−1.03 R. The only divergence was
+  the fee constants, now sourced from the venue at startup.
 - Code: per-side maker/taker fee booking fixed; 11/11 suites green on
   Python 3.14.4 / pandas 3.0.5 / sklearn 1.9.0.
 - Hosting: Oracle A1, **2 OCPU / 12 GB free**, split into a 1/2 collector box
@@ -110,7 +117,7 @@ the full cost model — no exceptions.**
 | Bybit rejects a post-only entry | Set `ENTRY_LIMIT_ORDERS=0` for that leg, record the economics delta (maker→taker is +4bp/side). |
 | Bybit rejects the TP limit attach | Set `TP_LIMIT_ORDERS=0`, record the delta. Both fallbacks are documented in the compose. |
 | BTC min-notional skips >30% of its signals | A **sizing** decision, not a strategy change: fund the BTC legs specifically or run ex-BTC. Re-validate weights either way. |
-| Measured costs degrade the edge >0.2 Sh (L2) | HALT, re-price the cost model, re-run the gate battery before resuming. |
+| Measured costs degrade the edge >0.2 Sh (L2) | HALT, re-price, re-run the gates. **Exercised 2026-08-08**: measured fees cost ΔSh −0.08 — inside tolerance, no halt, model re-priced. |
 | PULL cumulative R < **−10** over the trailing ≥20 trades | Demote to BLEND75 or triple-only. −10 sits outside the noise floor (5th pct at N=20 is −6.8); plain "< 0" would fire on a healthy leg 18% of the time. **Never evaluate below 20 trades.** |
 | A month closes worse than −5% | Not an automatic halt: backtest worst is −3.6% and the tail is real. Do re-check realised dMDD against the model. |
 | Live equity diverges >1% from the exchange | Check **per-leg**, never per-bot-vs-account-wide (Pattern: a $112 leg vs a $900 account reads as a false −85%). Suspect the fee model first. |
