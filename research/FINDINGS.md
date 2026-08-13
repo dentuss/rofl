@@ -231,6 +231,51 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-13 — sl 3.0 REJECTED at G5. The engine's +0.14 is not reproducible live.
+
+`test_exec_parity.py` with `TL_SL_MULT=3.0`. The harness previously hardcoded
+`sl_mult=1.8` on the ENGINE side while the bot read `cfg.tl_sl_mult` — so a
+non-default run would have compared two different geometries. Both are now
+bound to the same env with an assert; **unset reproduces the deployed gate
+byte-for-byte, and the control run was re-verified green before trusting 3.0.**
+
+**FORMAL FAIL: 1 UNEXPECTED divergence region** (INJ-USDT, bars 3219–3232).
+Mechanism traced exactly: both legs enter long at bar 3136. The ENGINE exits at
+3215 on the signal flip and never re-enters (a flip exit consumes the signal).
+The LIVE bot deliberately holds through flips, is stopped out at 3218, then
+**re-enters short at 3219** on the still-live −1 signal. The classifier
+attributes cascades to the flip bar only, so a detached second region reads as
+UNEXPECTED. Wider stops → longer holds through flips → longer cascades.
+
+**SUBSTANTIVE FAIL, and the real reason to reject — live-vs-engine equity drift:**
+
+| pair | sl 1.8 | sl 3.0 |
+|---|---|---|
+| INJ | −0.2% | −9.1% |
+| SOL | −1.7% | −7.9% |
+| ADA | −4.3% | −3.6% |
+| ETH | −0.9% | +13.3% |
+| LINK | +2.9% | −8.6% |
+| **mean abs** | **2.0%** | **8.5%** |
+| **mean signed** | −0.8% | **−3.2%** |
+
+Mean absolute drift QUADRUPLES and the signed mean turns adversely negative.
+At sl 1.8 the executor tracks the engine to ~2%; at sl 3.0 it does not track it
+at all. **The backtested ΔSh +0.14 describes an engine whose behaviour the live
+bot does not reproduce at that stop width** — so it is not a forecast of the
+live book, whatever G1/G2/G4/long-history said.
+
+**VERDICT: sl 3.0 REJECTED. Deployed sl_mult stays 1.8.** Final gate record:
+G1 ✓ G2 ✓ G3 N/A G4 ✓ long-history ✓ **G5 ✗**. This is exactly what the gate
+battery is for — four gates measured the idea in the engine, and the fifth
+asked whether the live bot would actually do it. It would not. **I deliberately
+did NOT patch the classifier to reclassify the INJ region; changing a gate to
+make a result pass is only legitimate when the justification is independent of
+the outcome, and here it is not.** The drift table fails it regardless.
+
+**Standing implication for the DEPLOYED book:** even at sl 1.8 there is 2.0%
+mean drift from the same flip behaviour. Tolerable, measured, now on record.
+
 ## 2026-08-13 — sl 3.0 PASSES the long-history gate, but SPLITS the two legs
 
 `research/stop_longhist.py`. The 2022-inclusive pseudo-OOS that rejected
@@ -282,6 +327,67 @@ CAGR give-up measured in G4.
 **GATE STATUS: G1 ✓ G2 ✓ G3 N/A G4 ✓ LONG-HISTORY ✓. G5 exec parity is the
 only gate left. STILL NOT ADOPTED — deployed sl_mult stays 1.8, live config
 untouched.**
+
+## 2026-08-13 — PULL leg: the 2022 caveat was WRONG; it is overweighted at 50%
+
+Prompted by a direct question — is the pull leg worth 8 containers and a second
+exchange account? Measured rather than argued.
+
+**The caveat that softened the 2026-07-06 finding does not hold.** That entry
+excused PULL's pre-2023 −2.57 as "6 names, rare trades in 2022–23". Trade
+counts on MAJORS8, full history:
+
+| leg | pre-2023-08 | post | pre share |
+|---|---|---|---|
+| TRIPLE | 508 | 1228 | 29.3% |
+| PULL | **70** | 111 | **38.7%** |
+
+70 trades is not a thin sample, and PULL's pre-2023 SHARE is HIGHER than
+TRIPLE's. **The −2.53 is real: the leg genuinely lost money through the bear
+regime.** Correcting this, because it is load-bearing for the weight decision.
+
+**Weight sweep** (project naming: BLEND75 = 0.75 triple + 0.25 pull):
+
+| book | full | pre-2023 | post | MDD |
+|---|---|---|---|---|
+| triple-only | 0.99 | **0.56** | 1.18 | −9.5% |
+| **BLEND75** | **1.01** | **0.43** | 1.25 | −7.4% |
+| BLEND50 (LIVE) | 1.02 | 0.17 | 1.37 | −5.9% |
+| 0.25 triple / 0.75 pull | 0.96 | −0.65 | 1.53 | −5.0% |
+| pull-only | 0.35 | −2.53 | 1.27 | −6.7% |
+
+Monthly corr triple↔pull: full **+0.12**, pre −0.31, post +0.23.
+
+**Is it a waste? No — but it is overweighted.**
+* **NOT a waste:** corr +0.12 is genuine diversification, and it buys MDD
+  −9.5% → −5.9%. That is a real 3.6pp, not a statistical artifact.
+* **But it fails the sleeve law standalone**: full 0.35 (< 0.5 ✗), pre −2.53
+  (< 0 ✗), corr ✓. **Proposed today as a new sleeve it would be REJECTED on
+  two of three criteria.** It is grandfathered from an adoption made on
+  common-window evidence (Sh 1.33–1.36, MDD −2.1%, G3 98th pct) that was
+  legitimate then and that long-history data has since undercut.
+* **Full-history Sharpe is FLAT across 0→50% pull** (0.99 → 1.01 → 1.02).
+  The leg buys ~+0.03 Sharpe — noise — while costing −0.39 pre-2023.
+
+**RECOMMENDATION: take the ALREADY-PRE-REGISTERED demotion to BLEND75**
+(registered 2026-07-06: "trailing-3mo live+paper Sh < 0 → BLEND75 or
+triple-only"). Same full-history Sharpe as today (1.01 vs 1.02), pre-2023
+recovers 0.17 → 0.43, MDD −7.4% still well inside triple-only's −9.5%. This
+requires NO new experiment — the path was registered in advance, which is
+exactly why it can be taken without a fresh OOS. **Picking 25% off this table
+because the table says so would be post-hoc weight mining (law 2); taking a
+pre-registered fallback that the evidence now supports is not.**
+
+**The ops saving does NOT materialise at BLEND75.** Cutting weight still needs
+8 pull containers, just smaller — and at $112/leg the smaller notionals move
+toward exchange minimums. Only **triple-only** frees the 8 containers and
+collapses the two-account split (Pattern A). That trade is 3.6pp of drawdown
+for 8 containers and one account. Not recommended on this evidence, but it is
+now a priced decision rather than an open question.
+
+**Live so far:** 0 pull entries in 5 days — still uninformative (regime-gated,
+correlated across symbols). The demotion trigger keys on trailing-3mo Sh, not
+on trade count.
 
 ## 2026-08-13 — LIVE GAP: bot.py never books funding (backtest does)
 

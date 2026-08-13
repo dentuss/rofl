@@ -64,8 +64,15 @@ from core.backtest import BTConfig, run_backtest  # noqa: E402
 from core.data import fetch_ohlcv  # noqa: E402
 from core.strategies import pullback_in_trend, triple_confirm_bidir  # noqa: E402
 
+# Stop width for BOTH sides of the comparison. bot.py reads TL_SL_MULT for the
+# triple and pullback legs alike (cfg.tl_sl_mult, default 1.8); the engine side
+# used to hardcode 1.8 here. Binding them to the SAME env is what makes a
+# non-default run a parity test rather than a mismatch test: set TL_SL_MULT and
+# the live executor and the fixed engine move together. Unset reproduces the
+# deployed gate exactly (1.8 == the previous literal).
+SL_MULT = float(os.getenv("TL_SL_MULT", "1.8"))
 BASE = dict(ema_fast=9, ema_slow=26, ema_trend=50, rsi_min=55.0, adx_min=22.0,
-            atr_n=14, sl_mult=1.8, tp_mult=3.0)
+            atr_n=14, sl_mult=SL_MULT, tp_mult=3.0)
 RISK, LEV, MAX_BARS = 0.02, 5.0, 96
 
 # Inclusive end of the pinned evaluation window (see the docstring). Fixed as a
@@ -232,7 +239,7 @@ def run_case(pair: str, days: int = 180, cooldown: int = 0,
         raise SystemExit(f"{pair}: no bars at or before PARITY_END={PARITY_END}")
     if strategy == "pullback":
         sig = pullback_in_trend(
-            df, tp_mult=6.0 if tp_mult is None else tp_mult)
+            df, tp_mult=6.0 if tp_mult is None else tp_mult, sl_mult=SL_MULT)
         preset = "pullback_bidir_4h"
     else:
         params = dict(BASE) if tp_mult is None else {**BASE, "tp_mult": tp_mult}
@@ -286,7 +293,14 @@ def main():
     pairs = [("INJ-USDT", 180), ("SOL-USDT", 180), ("ADA-USDT", 180),
              ("ETH-USDT", 180), ("LINK-USDT", 180)]
     print(f"PINNED WINDOW: bars <= {PARITY_END} "
-          f"(strict legacy={'on' if PARITY_STRICT else 'off'})\n")
+          f"(strict legacy={'on' if PARITY_STRICT else 'off'})")
+    print(f"STOP WIDTH:    sl_mult={SL_MULT} on BOTH sides "
+          f"(engine BASE and bot cfg.tl_sl_mult={botmod.BotConfig().tl_sl_mult})"
+          f"{'' if SL_MULT == 1.8 else '   <-- NON-DEPLOYED, gate run for research'}\n")
+    assert abs(botmod.BotConfig().tl_sl_mult - SL_MULT) < 1e-9, (
+        f"stop width mismatch: engine {SL_MULT} vs bot "
+        f"{botmod.BotConfig().tl_sl_mult}. TL_SL_MULT must be set in the "
+        f"environment BEFORE `import bot` (BotConfig reads env at import).")
 
     print("--- LEGACY 1h (K=0): retired program, reported not gated ---")
     base_unexpected = sum(run_case(p, d, cooldown=0) for p, d in pairs)
