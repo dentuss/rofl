@@ -231,6 +231,74 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-13 — STOP GEOMETRY: trailing stop REJECTED; wider SL passes but is not monotone
+
+Prompted by a live run of **7 consecutive stop-outs**. That streak is NOT
+evidence and was not treated as such: with the backtested exit mix (sl 67.6% /
+tp 23.6%), **P(no TP in 7 trades) = 15%, about one stretch in seven**, and the
+95% CI on the true TP-rate given 0/7 is **[0%, 41%]**, which contains 23.6%.
+Seven trades cannot reject the design; ~20 would begin to.
+
+The study was justified instead by an audit finding: **`sl_mult = 1.8` had
+never been swept** (TP width was — tp_mult 3→6, monotone) and **`trail_atr`
+carried no verdict at all** despite living in the engine since the honest
+rebuild. Two orphaned parameters, same class as `max_bars_in_trade = 96`.
+
+| cell | trades | tp% | sl% | CAGR% | Sh | ΔSh | ΔdMDD | IS | OOS |
+|---|---|---|---|---|---|---|---|---|---|
+| A1.2 sl 1.2 | 2370 | 17.2 | 78.5 | 7.0 | 0.85 | −0.32 | −2.1 | 0.68 | 1.03 |
+| A1.5 sl 1.5 | 2115 | 20.0 | 73.6 | 5.6 | 0.80 | −0.38 | −1.2 | 0.79 | 0.79 |
+| **A1.8 CONTROL** | 1921 | 23.3 | 68.0 | **8.5** | **1.18** | — | — | 1.34 | 0.99 |
+| A2.2 sl 2.2 | 1775 | 26.3 | 62.5 | 6.2 | 1.04 | −0.14 | +1.2 | 1.22 | 0.81 |
+| A3.0 sl 3.0 | 1589 | 30.5 | 49.4 | 6.0 | **1.30** | **+0.12** | +2.6 | 1.47 | 1.03 |
+| B2.0 trail 2.0 | 2471 | 11.9 | 87.4 | 2.7 | 0.70 | −0.48 | +0.3 | 0.75 | 0.64 |
+| B3.0 trail 3.0 | 2076 | 18.1 | 79.6 | 5.9 | 0.99 | −0.18 | +0.2 | 1.21 | 0.77 |
+| B4.0 trail 4.0 | 1968 | 21.1 | 74.4 | 5.6 | 0.94 | −0.23 | +0.1 | 1.10 | 0.72 |
+
+**TRAILING STOP: REJECTED, decisively and on the pre-registered prior.**
+Every cell is worse, and the mechanism is legible — trail 2.0 pushes the SL
+rate from 68% → **87.4%** and TP from 23.3% → **11.9%**. It converts winners
+into stop-outs. This is the THIRD independent confirmation of "winners must
+run" (partial-TP rejected twice, now trailing). `trail_atr` moves from
+orphaned to explicitly rejected; the default stays 0.0.
+
+**SL WIDTH: A3.0 clears the pre-registered bar (a/b/c/d all Y, ΔSh +0.12) —
+and I do not think it should be acted on yet.** Three reasons the bar did not
+encode:
+
+1. **The ladder is NOT monotone**: 0.85 → 0.80 → **1.18** → 1.04 → 1.30. The
+   control sits on a local peak, 2.2 DIPS below it, then 3.0 rises. A genuine
+   "the stop is too tight" effect would climb monotonically from 1.8. A jagged
+   curve with the neighbouring cell moving −0.14 in the OPPOSITE direction is
+   the shape of noise, not of a mechanism.
+2. **+0.12 is 2–4 units of the documented 0.03–0.05 run-to-run jitter.**
+3. **IS improves more than OOS** (1.34→1.47 vs 0.99→1.03) — mild overfit shape.
+
+In fairness the other way: the CAGR drop (8.5→6.0) is **not** automatically the
+"defensive only" pattern that killed per-regime sizing, because dMDD is 2.6pp
+BETTER and this framework converts lower drawdown into leverage via the vol
+dial — at equal vol, Sh 1.30 vs 1.18 is ~10% more CAGR at equal risk. The R:R
+confound was declared in advance: at sl 3.0 / tp 6.0 reward:risk falls 3.33 →
+2.00, so A3.0 is a different payoff shape, not the same strategy with more room.
+
+**Verdict: A3.0 earns G4 universe generalization, NOT adoption.** If the effect
+is real it should appear across EW23/MAJORS12 too; if it is the noise the
+non-monotone ladder suggests, G4 will say so. Deployed value stays 1.8.
+
+**MECHANISM (clean, monotone, and the one solid result here).** Mean R on
+stopped trades improves monotonically with stop width — exactly as a fixed
+cost divided by a wider stop predicts:
+
+| sl_mult | mean stop | mean R on stops |
+|---|---|---|
+| 1.2 | 3.08% | −1.047 |
+| 1.8 | 4.58% | −1.031 |
+| 3.0 | 7.25% | −1.019 |
+
+Confirmed independently in the live fills (btc-t 1.14% stop → −1.152R;
+ada-t 4.33% → −1.027R). The effect is real but small: **0.028R across the whole
+range.** It is a reason tight stops are mildly expensive, not a reason to widen.
+
 ## 2026-08-09 — Venue shopping: the whole gain is on Bybit already
 
 Asked whether a cheaper venue could support a higher-frequency system.
