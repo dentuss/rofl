@@ -231,6 +231,58 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-13 — sl 3.0 PASSES the long-history gate, but SPLITS the two legs
+
+`research/stop_longhist.py`. The 2022-inclusive pseudo-OOS that rejected
+TSMOM-90 (−0.70) and carry (−0.34), method identical to `trend_longhist.py` so
+the control is directly comparable. Expanding MAJORS8 book from 2022-03,
+per-pair data start + 365d warmup, nothing clipped to the common window.
+
+| book | cell | full | pre-2023-08 | post | MDD |
+|---|---|---|---|---|---|
+| TRIPLE_CONF | sl 1.8 | +0.98 | +0.56 | +1.16 | −9.6% |
+| TRIPLE_CONF | **sl 3.0** | **+1.09** | +0.56 | **+1.34** | **−6.2%** |
+| PULL_CONF | sl 1.8 | +0.37 | −2.63 | +1.32 | −6.9% |
+| PULL_CONF | **sl 3.0** | **+0.16** | −2.54 | **+1.13** | −5.1% |
+| BLEND50 | sl 1.8 | +1.01 | +0.16 | +1.35 | −5.9% |
+| BLEND50 | **sl 3.0** | **+1.07** | **+0.18** | **+1.49** | **−4.3%** |
+
+**GATE: PASS.** Absolute bar full +1.07 ≥ 0.50 and pre +0.18 ≥ 0.00; relative
+bar ΔSh pre +0.02 (not negative, so not the pre-registered regime-artifact
+signature). Control reproduces `trend_longhist` within drift (+1.01/+0.16/+1.35
+vs the 2026-07-06 +1.20/+0.18/+1.68 — the window has since absorbed July 2026's
+−3.6%).
+
+**What the pass does and does not say.** ΔSh pre-2023 is **+0.02 — nothing.**
+The gate was cleared on "does not degrade", NOT on "improves". The entire gain
+is post-2023 (+0.14), which is exactly where it was discovered. So this gate has
+confirmed the mechanism does not BREAK in the bear regime; it has NOT
+independently confirmed the mechanism. That distinction is the whole point of a
+pseudo-OOS and it should not be blurred in the summary.
+
+**THE MATERIAL NEW FINDING — sl 3.0 helps TRIPLE and hurts PULL.** No prior test
+could see this; G4 measured blends only.
+* TRIPLE full +0.98 → **+1.09**, post +1.16 → +1.34, MDD −9.6% → −6.2%.
+* PULL full +0.37 → **+0.16**, post +1.32 → +1.13.
+The blend improves only because triple's gain outweighs pull's loss. Adopting
+sl 3.0 **uniformly would make the already-weak leg weaker** — PULL was
++0.37 (already under the 0.5 sleeve-law floor) and this takes it to +0.16, with
+its armed demotion trigger (trailing-3mo live+paper Sh < 0 → BLEND75 or
+triple-only) that much closer to firing.
+
+**The obvious follow-up is a NEW EXPERIMENT, not a tweak.** Per-leg stop width
+(3.0 on triple, 1.8 on pull) is a widened grid and law 2 requires its own
+pre-registration and its own OOS. Deliberately NOT run opportunistically off
+the back of this result — that is precisely the post-hoc mining the law forbids.
+
+**Real prize is the drawdown:** blend MDD −5.9% → −4.3%, a 1.6pp improvement,
+which is what converts to leverage capacity under the vol dial and pays for the
+CAGR give-up measured in G4.
+
+**GATE STATUS: G1 ✓ G2 ✓ G3 N/A G4 ✓ LONG-HISTORY ✓. G5 exec parity is the
+only gate left. STILL NOT ADOPTED — deployed sl_mult stays 1.8, live config
+untouched.**
+
 ## 2026-08-13 — LIVE GAP: bot.py never books funding (backtest does)
 
 Routine reconcile of the 7 live closes against Bybit `closed-pnl`. Two checks,
