@@ -231,6 +231,49 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-13 — sl_mult 3.0 PASSES G4; my noise call was wrong, but it is not adopted
+
+`research/stop_g4.py`. The gate that separates "real mechanism" from "fit to
+one book", run with no re-tuning: the same single comparison (sl 1.8 vs 3.0)
+carried onto structural books built the legal way — QUAL23 ranked by EX-ANTE
+median daily dollar volume, top 8/12/16/all.
+
+| book | n | sl 1.8 Sh | sl 3.0 Sh | ΔSh | ΔCAGR |
+|---|---|---|---|---|---|
+| MAJORS8 | 8 | 1.11 | 1.25 | **+0.15** | −2.1 |
+| MAJORS12 | 12 | 0.96 | 1.11 | **+0.14** | −1.2 |
+| MAJORS16 | 16 | 0.72 | 0.86 | **+0.14** | −0.6 |
+| EW23 | 23 | 0.67 | 0.73 | +0.06 | −0.6 |
+
+**G4 PASS.** All four positive; MAJORS8 (+0.15) is not an outlier against the
++0.12 mean of the others. **I called the +0.12 noise on the strength of the
+non-monotone ladder — that call is weakened.** A fit to MAJORS8 does not
+reproduce +0.14 on MAJORS12 and MAJORS16 with a book it never saw.
+
+**What survives from the earlier caveats:**
+* **CAGR falls in EVERY book** (−2.1 / −1.2 / −0.6 / −0.6). This is a
+  risk-adjusted gain bought with return — legitimate in this framework only
+  because the vol dial converts lower drawdown into leverage, which is the
+  same argument that justified BLEND50 over triple-only.
+* **The non-monotone ladder is still unexplained.** G4 tests generalisation
+  across UNIVERSES, not across the parameter axis. sl 2.2 sitting −0.14 below
+  a control that 3.0 beats by +0.15 remains odd, and no mechanism has been
+  offered for it. Per-trade expectancy is smooth (+0.076R / +0.077R / +0.107R
+  at 1.8 / 2.2 / 3.0), so the dip is not in expectancy — it is path or
+  variance, and it is unexplained rather than explained away.
+* **The R:R confound stands**: sl 3.0 / tp 6.0 is 2.00 reward:risk, not 3.33.
+  TP rate rises 23.3% → 30.5% while each win is worth less in R.
+
+**GATE STATUS: G1 ✓ (IS 1.34→1.47, OOS 0.99→1.03), G2 ✓ (thirds all +),
+G3 N/A (no entry logic), G4 ✓. STILL MISSING: G5 exec parity, and the
+LONG-HISTORY GATE (2022-inclusive, full Sh ≥ 0.5 AND pre-2023-08 ≥ 0).**
+
+The long-history gate is the decisive one and the likeliest place for this to
+die — it is what killed TSMOM-90 (−0.70) and carry (−0.34), and 2022 is
+exactly the regime where wider stops with smaller positions behave differently.
+**NOT ADOPTED. Deployed sl_mult stays 1.8 and nothing in the live config
+changed.**
+
 ## 2026-08-13 — STOP GEOMETRY: trailing stop REJECTED; wider SL passes but is not monotone
 
 Prompted by a live run of **7 consecutive stop-outs**. That streak is NOT
