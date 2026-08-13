@@ -231,6 +231,42 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-13 — PER-LEG stop width is dead from BOTH directions; sl 3.0 CLOSED
+
+Follow-up to the G5 rejection: if sl 3.0 helped TRIPLE standalone (+0.98 →
++1.09 on long history) and hurt PULL (+0.37 → +0.16), the surviving idea was
+3.0 on triple / 1.8 on pull. **It does not survive.** Correcting my own earlier
+statement that "triple-only at 3.0 was never parity-tested separately" — it
+was: the G5 run exercises both tiers, and the TRIPLE tier is the one that
+failed. Re-run in ISOLATION to confirm the verdict is its own and not an
+artefact of tier ordering or shared state; it reproduces exactly.
+
+| tier | sl 1.8 | sl 3.0 |
+|---|---|---|
+| TRIPLE — UNEXPECTED regions | 0 | **1** (INJ 3219–3232) |
+| TRIPLE — mean abs drift | 2.0% | **8.5%** |
+| PULL — UNEXPECTED regions | 0 | 0 |
+| PULL — mean abs drift | 1.0% | 1.8% |
+
+**The two axes are exactly anti-aligned:**
+* On the leg where 3.0 HELPS returns (triple), the live executor cannot
+  reproduce it — parity breaks and drift quadruples.
+* On the leg where parity HOLDS (pull, 0 unexpected, drift still ~1.8%), 3.0
+  HURTS returns.
+
+Mechanism is consistent with the G5 finding: the divergence is driven by the
+live bot holding through signal flips the engine exits on, and TRIPLE is the
+flip-heavy leg (5–7 flip-cascade regions per pair vs 0–1 for pull, which trades
+~10x less often). A wider stop lengthens every hold, so it amplifies exactly
+the behaviour triple has most of.
+
+**sl_mult 3.0 is CLOSED — uniform and per-leg both.** No further variant is
+owed a test. Final record: G1 ✓ G2 ✓ G3 N/A G4 ✓ long-history ✓ G5 ✗.
+Deployed `sl_mult` stays 1.8.
+
+Worth keeping: the deployed geometry's own 2.0% mean drift is now measured and
+on record as the baseline any future exec change is judged against.
+
 ## 2026-08-13 — sl 3.0 REJECTED at G5. The engine's +0.14 is not reproducible live.
 
 `test_exec_parity.py` with `TL_SL_MULT=3.0`. The harness previously hardcoded
