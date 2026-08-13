@@ -231,6 +231,61 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-13 — LIVE GAP: bot.py never books funding (backtest does)
+
+Routine reconcile of the 7 live closes against Bybit `closed-pnl`. Two checks,
+one clean and one not.
+
+**CLEAN — fill accounting is honest.** `bot.py:1216` books an autonomous close
+at the THEORETICAL stop (`fill = p.sl`), which looked like a slippage-blind
+optimism bug. It is not: `close_position` overrides the hint with
+`fetch_last_closed_fill()` (`fill_px = real["exit_px"]`). All 5 comparable
+exits match the exchange's `avgExitPrice` EXACTLY (64168.1 / 75.02 / 0.184 /
+1916.8 / 0.07044). The all-at-bar-close `exit_time`s are DETECTION times from
+the bar poll, not fill times — the exchange fires the attached SL intra-bar.
+Protection is real. Recorded so this is not re-investigated.
+
+**NOT CLEAN — funding is never booked.** `grep -c funding bot.py` = 0. Bot PnL
+is gross − entry fee − exit fee; Bybit's `closedPnl` includes funding.
+
+| leg | bot PnL | exchange | funding |
+|---|---|---|---|
+| btc-t | −3.39537 | −3.45861 | −0.0632 |
+| sol-t | −1.68580 | −1.72831 | −0.0425 |
+| ada-t | −2.22384 | −2.24477 | −0.0209 |
+| doge-t short | −1.77750 | −1.75728 | +0.0202 |
+| eth-t short | −1.53016 | −1.51868 | +0.0115 |
+| xrp-t short | −1.73048 | −1.73014 | +0.0003 |
+| doge-t long | −1.76055 | −1.76055 | 0.0000 |
+| **total** | **−14.104** | **−14.198** | **−0.095** |
+
+Longs paid, shorts received. Net −0.095 on ~701 cumulative entry notional =
+**~1.4 bp per round trip, ~11% of the 12 bp fee bill.** Small in absolute
+terms and NOT an emergency, but three reasons it is a real defect:
+
+1. **Wrong direction.** Local equity reads BETTER than the exchange. Every
+   other cost gap this project found read worse.
+2. **It feeds a safety control.** The −8% halt line is evaluated on bot
+   equity, so it fires LATE, and later the longer positions are held.
+3. **It inverts the usual asymmetry.** The backtest models real per-pair
+   funding (`apply_funding_real`, every research script). The LIVE executor
+   is the less honest side — the one place the laws assume it never is.
+
+**FIX (proposed, not shipped):** in live mode only, take realised PnL from the
+exchange's `closedPnl` rather than recomputing it locally. That absorbs
+funding, fee-tier drift and partial fills in one move and makes live equity
+identical to the venue by construction. Paper path untouched
+(`cfg.mode == "live"` gate, house rule). Requires a 16-container redeploy, so
+it waits for a go.
+
+**Also observed, NOT a finding:** 7 live trades, all on `-t`; the `-p`
+(pullback) leg has taken 0 entries in 5 days. Backtest frequency is ~40
+trades/container/yr → λ≈4.4 expected across 8 `-p` containers in 5 days, and
+P(0)≈1% under INDEPENDENCE — but entries are regime-gated and correlated
+across symbols, so the effective draw count is far below 8 and 0 is
+unremarkable. Same discipline as the 7-stop streak: watch it, do not act on
+it. Revisit at ~20 `-p` opportunities.
+
 ## 2026-08-13 — sl_mult 3.0 PASSES G4; my noise call was wrong, but it is not adopted
 
 `research/stop_g4.py`. The gate that separates "real mechanism" from "fit to
