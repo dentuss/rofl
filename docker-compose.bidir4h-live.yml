@@ -101,18 +101,40 @@ x-bot: &bot-defaults
 x-triple: &triple-env
   <<: *env-defaults
   STRATEGY_PRESET: adaptive_bidir_4h
+  STARTING_EQUITY: ${TRIPLE_LEG_EQUITY:-168.30}
 
 x-pull: &pull-env
   <<: *env-defaults
   STRATEGY_PRESET: pullback_bidir_4h
+  STARTING_EQUITY: ${PULL_LEG_EQUITY:-56.10}
   # SUB-ACCOUNT key — see the two-accounts header block. Empty = the -p legs
   # refuse to trade live (ccxt auth fails loudly), which is the safe default.
   API_KEY: ${PULL_API_KEY:-}
   API_SECRET: ${PULL_API_SECRET:-}
 
-# Per-service capital (L1 = full book at unit weights): every leg gets
-# LEG4H_LIVE_EQUITY (default 112.50 = $1,800 / 16). The vol dial in L3
-# scales this single number, nothing else.
+# Per-service capital — BLEND75 (0.75 triple / 0.25 pull), demoted from the
+# 50/50 blend on 2026-08-13. The weights are NOT equal any more, so the single
+# per-leg var is gone: the -t legs read TRIPLE_LEG_EQUITY and the -p legs read
+# PULL_LEG_EQUITY, both set on the x-triple / x-pull anchors above.
+#
+#   book 1,795.20  ->  triple 0.75 = 1,346.40 / 8 = 168.30 per -t leg
+#                      pull   0.25 =   448.80 / 8 =  56.10 per -p leg
+#
+# WHY (research/FINDINGS.md 2026-08-13): the PULL leg fails the sleeve law
+# standalone (full Sh 0.35 < 0.5, pre-2023 -2.53 < 0) on 70 real pre-2023
+# trades — NOT the thin sample the 2026-07-06 caveat claimed. Full-history
+# Sharpe is flat across 0->50% pull (0.99/1.01/1.02), so the leg bought ~+0.03
+# for a -0.39 pre-2023 cost. BLEND75 keeps the diversification (corr +0.12,
+# MDD -7.4% vs triple-only -9.5%) at pre-2023 +0.43 vs the live book's +0.17.
+# This is the demotion PRE-REGISTERED on 2026-07-06, not a new weight search.
+#
+# The vol dial in L3 scales both numbers, keeping the 75/25 ratio.
+#
+# CAPITAL MUST MOVE WITH THE WEIGHTS. The -t legs draw on the MAIN account and
+# the -p legs on the SUB; the accounts must hold 1,346.40 / 448.80. The trading
+# keys are trade-only (NO transfer permission, by design), so the rebalance is
+# a MANUAL step in the Bybit UI before restarting. Changing the numbers here
+# without moving the cash gives every leg the wrong margin base.
 services:
   btc-t:
     <<: *bot-defaults
@@ -120,7 +142,6 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: BTC/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: ["${ROFL_DATA:-./data}/live/btc-t/state:/app/state", "${ROFL_DATA:-./data}/live/btc-t/logs:/app/logs", "live4h_cache:/app/.cache"]
   btc-p:
     <<: *bot-defaults
@@ -128,7 +149,6 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: BTC/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: ["${ROFL_DATA:-./data}/live/btc-p/state:/app/state", "${ROFL_DATA:-./data}/live/btc-p/logs:/app/logs", "live4h_cache:/app/.cache"]
 
   eth-t:
@@ -137,7 +157,6 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: ETH/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: ["${ROFL_DATA:-./data}/live/eth-t/state:/app/state", "${ROFL_DATA:-./data}/live/eth-t/logs:/app/logs", "live4h_cache:/app/.cache"]
   eth-p:
     <<: *bot-defaults
@@ -145,7 +164,6 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: ETH/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: ["${ROFL_DATA:-./data}/live/eth-p/state:/app/state", "${ROFL_DATA:-./data}/live/eth-p/logs:/app/logs", "live4h_cache:/app/.cache"]
 
   sol-t:
@@ -154,7 +172,6 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: SOL/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: ["${ROFL_DATA:-./data}/live/sol-t/state:/app/state", "${ROFL_DATA:-./data}/live/sol-t/logs:/app/logs", "live4h_cache:/app/.cache"]
   sol-p:
     <<: *bot-defaults
@@ -162,7 +179,6 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: SOL/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: ["${ROFL_DATA:-./data}/live/sol-p/state:/app/state", "${ROFL_DATA:-./data}/live/sol-p/logs:/app/logs", "live4h_cache:/app/.cache"]
 
   xrp-t:
@@ -171,7 +187,6 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: XRP/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: ["${ROFL_DATA:-./data}/live/xrp-t/state:/app/state", "${ROFL_DATA:-./data}/live/xrp-t/logs:/app/logs", "live4h_cache:/app/.cache"]
   xrp-p:
     <<: *bot-defaults
@@ -179,7 +194,6 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: XRP/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: ["${ROFL_DATA:-./data}/live/xrp-p/state:/app/state", "${ROFL_DATA:-./data}/live/xrp-p/logs:/app/logs", "live4h_cache:/app/.cache"]
 
   doge-t:
@@ -188,7 +202,6 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: DOGE/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: ["${ROFL_DATA:-./data}/live/doge-t/state:/app/state", "${ROFL_DATA:-./data}/live/doge-t/logs:/app/logs", "live4h_cache:/app/.cache"]
   doge-p:
     <<: *bot-defaults
@@ -196,7 +209,6 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: DOGE/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: ["${ROFL_DATA:-./data}/live/doge-p/state:/app/state", "${ROFL_DATA:-./data}/live/doge-p/logs:/app/logs", "live4h_cache:/app/.cache"]
 
   ada-t:
@@ -205,7 +217,6 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: ADA/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: ["${ROFL_DATA:-./data}/live/ada-t/state:/app/state", "${ROFL_DATA:-./data}/live/ada-t/logs:/app/logs", "live4h_cache:/app/.cache"]
   ada-p:
     <<: *bot-defaults
@@ -213,7 +224,6 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: ADA/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: ["${ROFL_DATA:-./data}/live/ada-p/state:/app/state", "${ROFL_DATA:-./data}/live/ada-p/logs:/app/logs", "live4h_cache:/app/.cache"]
 
   link-t:
@@ -222,7 +232,6 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: LINK/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: ["${ROFL_DATA:-./data}/live/link-t/state:/app/state", "${ROFL_DATA:-./data}/live/link-t/logs:/app/logs", "live4h_cache:/app/.cache"]
   link-p:
     <<: *bot-defaults
@@ -230,7 +239,6 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: LINK/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: ["${ROFL_DATA:-./data}/live/link-p/state:/app/state", "${ROFL_DATA:-./data}/live/link-p/logs:/app/logs", "live4h_cache:/app/.cache"]
 
   avax-t:
@@ -239,7 +247,6 @@ services:
     environment:
       <<: *triple-env
       SYMBOL: AVAX/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: ["${ROFL_DATA:-./data}/live/avax-t/state:/app/state", "${ROFL_DATA:-./data}/live/avax-t/logs:/app/logs", "live4h_cache:/app/.cache"]
   avax-p:
     <<: *bot-defaults
@@ -247,7 +254,6 @@ services:
     environment:
       <<: *pull-env
       SYMBOL: AVAX/USDT
-      STARTING_EQUITY: ${LEG4H_LIVE_EQUITY:-112.50}
     volumes: ["${ROFL_DATA:-./data}/live/avax-p/state:/app/state", "${ROFL_DATA:-./data}/live/avax-p/logs:/app/logs", "live4h_cache:/app/.cache"]
 
   # Telegram button panel (Stats / Positions / Today / Health / Reconcile).

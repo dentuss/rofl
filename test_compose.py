@@ -127,6 +127,40 @@ def test_paper_never_live():
     print("PASS paper stack       no MODE=live anywhere, distinct project name")
 
 
+def test_blend_weights_resolve():
+    """Every live leg must resolve a STARTING_EQUITY, and the book must sum right.
+
+    BLEND75 moved equity from 16 per-service lines onto the x-triple / x-pull
+    anchors. If a merge key ever breaks, the leg does NOT error — it silently
+    falls back to bot.py's own `STARTING_EQUITY` default of 100, which would
+    mis-size real money with no log line. That is the exact failure shape this
+    project keeps getting bitten by, so it gets a test rather than a comment.
+    """
+    d = _load("docker-compose.bidir4h-live.yml")
+    legs = {n: s for n, s in d["services"].items()
+            if n.endswith("-t") or n.endswith("-p")}
+    assert len(legs) == 16, f"expected 16 legs, found {len(legs)}"
+    seen = {"-t": set(), "-p": set()}
+    for name, svc in legs.items():
+        env = svc.get("environment") or {}
+        eq = env.get("STARTING_EQUITY")
+        assert eq, f"{name} resolves NO STARTING_EQUITY (anchor merge broken)"
+        seen[name[-2:]].add(str(eq))
+    assert len(seen["-t"]) == 1 and len(seen["-p"]) == 1, \
+        f"legs disagree within a book: {seen}"
+    t_raw, p_raw = seen["-t"].pop(), seen["-p"].pop()
+    assert "TRIPLE_LEG_EQUITY" in t_raw, f"-t legs not on the triple var: {t_raw}"
+    assert "PULL_LEG_EQUITY" in p_raw, f"-p legs not on the pull var: {p_raw}"
+    t = float(t_raw.split(":-")[1].rstrip("}"))
+    p = float(p_raw.split(":-")[1].rstrip("}"))
+    book = 8 * t + 8 * p
+    share = 8 * t / book
+    assert abs(book - 1795.20) < 0.01, f"book defaults sum to {book:.2f}, not 1795.20"
+    assert abs(share - 0.75) < 1e-6, f"triple share {share:.4f}, not the 0.75 of BLEND75"
+    print(f"PASS blend weights     16/16 resolve; 8x{t} + 8x{p} = {book:.2f}, "
+          f"triple share {share:.0%} (BLEND75)")
+
+
 if __name__ == "__main__":
     test_all_parse()
     test_no_undeclared_named_volumes()
@@ -135,4 +169,5 @@ if __name__ == "__main__":
     test_live_is_live_and_capped()
     test_collector_declares_symbols()
     test_paper_never_live()
+    test_blend_weights_resolve()
     print("\nAll compose tests passed.")

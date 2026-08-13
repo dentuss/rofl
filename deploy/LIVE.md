@@ -249,6 +249,67 @@ live record matching the model. Archive state before any resize
 
 ---
 
+## Changing the blend weights (BLEND50 → BLEND75)
+
+Adopted 2026-08-13 (research/FINDINGS.md). The `-t` legs move to
+`TRIPLE_LEG_EQUITY`, the `-p` legs to `PULL_LEG_EQUITY`; the old single
+per-leg var is gone. **This is not a config-only change** — the two books live
+in two different Bybit accounts, so the cash has to move too.
+
+**Prerequisite: the book must be FLAT.** Changing sizing requires clearing the
+state files (see the restart trap below), and clearing state while a position
+is open leaves the bot untracking real exposure — it restarts flat, finds a
+position it has no record of, and halts (best case). Wait for the open legs to
+close on their own, or close them by hand, and verify zero positions on BOTH
+accounts before starting.
+
+```bash
+# 1) confirm flat — must print 0 positions on each account
+make health | sed -n '/LIVE LEGS/,/HALT LINE/p'     # 'pos' column all '-'
+```
+
+**2) Measure the real capital, then split it 75/25.** Do NOT reuse the numbers
+in the compose defaults — they describe the nominal 1,795.20 book and the
+account has since drifted. Read both accounts' UNIFIED equity (main = `-t`,
+sub `roflbot_pullback` = `-p`), add them, and split:
+
+```
+  total = main_equity + sub_equity
+  main (triple) = total * 0.75      ->  TRIPLE_LEG_EQUITY = main / 8
+  sub  (pull)   = total * 0.25      ->  PULL_LEG_EQUITY   = sub  / 8
+```
+
+**3) Transfer the difference in the Bybit UI — by hand.** The trading keys are
+trade-only with NO transfer permission (by design, see CLAUDE.md), so neither
+the bot nor any tooling here can move it. Going from 50/50 to 75/25 means
+moving ~25% of the book from the SUB to MAIN. Verify both balances after.
+
+**4) Set the two vars** in `.env` on the box (never in the compose file):
+
+```bash
+TRIPLE_LEG_EQUITY=<main / 8>
+PULL_LEG_EQUITY=<sub / 8>
+```
+
+`init-trading.sh` refuses to call the box ready unless both are set.
+
+**5) The −8% halt line does NOT re-base.** It stays anchored to the ORIGINAL
+deploy baseline of 1,795.20 (halt at −143.62). Re-basing it onto post-drawdown
+capital would quietly forgive the drawdown already taken, which is moving the
+goalposts. Sizing follows current capital; the kill switch follows the deploy.
+
+**6) Clear state and restart** — the procedure immediately below. Then verify
+every leg came up on the intended number:
+
+```bash
+make health | sed -n '/LIVE LEGS/,/HALT LINE/p'   # -t legs at the new equity,
+                                                  # -p legs at a THIRD of them
+```
+
+If any leg reports ~100.00 the anchor merge silently failed and it fell back to
+bot.py's default — stop and fix before it sizes an order.
+(`test_compose.py::test_blend_weights_resolve` guards this locally.)
+
 ## ⚠ Restart trap: the state file overrides `STARTING_EQUITY`
 
 `State.load()` reads `equity=d["equity"]` from `bot_state.json` when the file

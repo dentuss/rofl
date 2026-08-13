@@ -956,7 +956,25 @@ class Exchange:
                 updated_ms = int(float(r.get("updatedTime") or 0)) or None
             except (TypeError, ValueError):
                 updated_ms = None
-            return {"exit_px": exit_px, "qty": qty, "updated_ms": updated_ms}
+
+            # `closedPnl` is the VENUE's own realised figure: gross MINUS the
+            # open fee, the close fee AND funding. Our local booking computes
+            # gross-minus-fees and has never included funding at all (measured
+            # 2026-08-13 over the first 7 live closes: -0.095 total, ~1.4bp per
+            # round trip). Returning it lets close_position book what the
+            # exchange actually credited instead of a model of it. Parsed
+            # defensively and independently of the fees — a row missing one
+            # field must not discard the others.
+            def _f(key):
+                try:
+                    v = r.get(key)
+                    return None if v in (None, "") else float(v)
+                except (TypeError, ValueError):
+                    return None
+
+            return {"exit_px": exit_px, "qty": qty, "updated_ms": updated_ms,
+                    "closed_pnl": _f("closedPnl"),
+                    "open_fee": _f("openFee"), "close_fee": _f("closeFee")}
         return None
 
 
@@ -1717,9 +1735,11 @@ class Bot:
         #    the theoretical price overstates PnL (the booked-vs-exchange gap).
         #    Fall back to the theoretical hint only if history is unavailable.
         #  - Paper: use the SL/TP price when triggered — matches the backtest.
+        real_rec: dict | None = None
         if self.cfg.mode == "live":
             if order is None:
-                real = self.ex.fetch_last_closed_fill(pos, since_ms=pos.open_ts * 1000)
+                real = real_rec = self.ex.fetch_last_closed_fill(
+                    pos, since_ms=pos.open_ts * 1000)
                 if real is not None:
                     self.log.info(f"booking autonomous close at REAL fill "
                                   f"{real['exit_px']:.4f} (theoretical was {fill_px:.4f})")
@@ -1742,7 +1762,8 @@ class Bot:
                 if avg:
                     fill_px = avg
                 else:
-                    real = self.ex.fetch_last_closed_fill(pos, since_ms=pos.open_ts * 1000)
+                    real = real_rec = self.ex.fetch_last_closed_fill(
+                        pos, since_ms=pos.open_ts * 1000)
                     if real is not None:
                         self.log.info(f"booking bot-initiated close at REAL fill "
                                       f"{real['exit_px']:.4f} (hint was {fill_px:.4f})")
@@ -1768,6 +1789,43 @@ class Bot:
         exit_rate = self.ex.fee_maker if exit_maker else self.ex.fee_taker
         fees = pos.notional * entry_rate + fill_px * pos.qty * exit_rate
         pnl = gross - fees
+
+        # --- FUNDING (live only) -------------------------------------------
+        # `gross - fees` above has NEVER included funding: `grep -c funding
+        # bot.py` was 0 until 2026-08-13. Reconciling the first 7 live closes
+        # against Bybit closed-PnL measured the gap at -0.095 total (~1.4bp per
+        # round trip, ~11% of the 12bp fee bill) — small, but it read
+        # FAVOURABLE, and the -8% halt line is evaluated on this equity, so it
+        # would fire LATE and later the longer positions are held. The backtest
+        # models real per-pair funding everywhere (apply_funding_real), so the
+        # LIVE side was the less honest one — the inversion the laws assume
+        # never happens.
+        #
+        # The venue's own `closedPnl` nets gross, both fees AND funding, so
+        # adopting it makes live equity identical to the exchange by
+        # construction and absorbs fee-tier drift for free. Paper is untouched
+        # (mode gate) — paper must keep mirroring the engine, which applies
+        # funding through its own model.
+        if self.cfg.mode == "live":
+            if real_rec is None:
+                real_rec = self.ex.fetch_last_closed_fill(
+                    pos, since_ms=pos.open_ts * 1000)
+            venue_pnl = (real_rec or {}).get("closed_pnl")
+            if venue_pnl is not None:
+                o_fee, c_fee = real_rec.get("open_fee"), real_rec.get("close_fee")
+                self.log.info(
+                    f"booking VENUE closedPnl {venue_pnl:+.6f} (local model "
+                    f"{pnl:+.6f}, delta {venue_pnl - pnl:+.6f} = funding + "
+                    f"fee-rate drift)")
+                pnl = venue_pnl
+                # Keep the reported fee consistent with the booked PnL, so the
+                # blotter's pnl and fees columns describe the same trade.
+                if o_fee is not None and c_fee is not None:
+                    fees = o_fee + c_fee
+            else:
+                self.log.warning(
+                    f"venue closedPnl unavailable ({reason}) — booking the local "
+                    f"model {pnl:+.6f}; FUNDING NOT INCLUDED for this trade")
         pct = (pnl / pos.notional * 100) if pos.notional else 0.0
         self.state.equity += pnl
         self.state.realised_trades += 1
