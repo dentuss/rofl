@@ -231,6 +231,65 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-15 — FIRST TP: the maker-exit assumption did NOT hold (n=1)
+
+`link-t` LONG 8.775 → 9.550, qty 6.5, the book's first take-profit after 7
+stops. Reconciled against Bybit closed-PnL. Bot booked **+4.99462**, exchange
+paid **+4.93757**. The −0.05705 gap splits into two causes, and the NEW one is
+the larger:
+
+| component | amount |
+|---|---|
+| TP exit booked maker, charged TAKER | **−0.0397** |
+| funding (long, ~2 days) | −0.0174 |
+
+**Fee rates, straight off the record:**
+* entry `openFee` 0.0205335 / 57.0375 = **3.6 bp = MAKER** ✓ — the post-only
+  entry worked exactly as designed.
+* exit `closeFee` 0.062075 / 62.075 = **10.0 bp = TAKER** ✗ — despite
+  `orderType: "Limit"`.
+
+**Mechanism:** the exit filled at **9.550 against an order price of 9.546** —
+BETTER than the limit. A resting limit hit passively fills AT its price; this
+one crossed the book, so price gapped up through the TP and the fill took
+liquidity. `close_position` assumes `reason.startswith("tp") and order is None`
+⇒ maker, which is wrong whenever the TP is reached by a gap rather than a
+touch.
+
+**Already fixed on the live side, by accident of doing the right thing.** The
+undeployed funding fix books the venue's `closedPnl` verbatim, which absorbs
+the ACTUAL fee whatever it turns out to be — no maker/taker modelling on the
+live path at all. The commit message claimed it "absorbs fee-tier drift for
+free"; that was more true than intended.
+
+**NOT fixed on the research side, and this is the part that matters.**
+`core/backtest_enhanced.py:195` books TP exits at `cfg.fee_maker` under
+`tp_as_limit=True`, and `research/cost_engine.py` carries the measured
+FEE_TAKER 10.0 / FEE_MAKER 3.6 bp. If real TP fills are taker:
+
+```
+  modelled round trip  3.6 + (0.233*3.6 + 0.767*10.0) = 12.11 bp
+  if TP exits are taker 3.6 + 10.0                    = 13.60 bp
+  understatement                                        1.49 bp  (+12.3%)
+```
+
+(0.233 = the measured TP rate at sl 1.8.) Small in absolute terms against
+200–400 bp moves — the 4h/6-ATR design still sidesteps the cost floor — but it
+is a SYSTEMATIC overstatement of every backtested winner, which is the class of
+error this project exists to catch.
+
+**CAVEAT, stated first because it is load-bearing: n = 1.** One TP is not a
+rate. A TP reached by a gradual touch genuinely would rest and fill as maker;
+this one gapped. The SL on the same leg reconciles EXACTLY (entry 3.6 bp maker,
+exit 10.0 bp taker, only funding missing), so nothing here impugns the stop
+path. **Do not re-baseline the book's Sharpe on one observation.**
+
+**Owed next:** (a) keep counting — every future TP gets this reconcile, and the
+maker share of TP exits is the statistic that decides it; (b) the cheap
+pessimistic bound is a re-run of the deployed config with `tp_as_limit=False`
+(all exits taker), which brackets the true number between it and today's. NOT
+run yet — one observation does not justify moving the headline.
+
 ## 2026-08-13 — PER-LEG stop width is dead from BOTH directions; sl 3.0 CLOSED
 
 Follow-up to the G5 rejection: if sl 3.0 helped TRIPLE standalone (+0.98 →
