@@ -4,20 +4,20 @@ Systematic crypto-perp trading program on Bybit USDT-linear. This file is the
 constitution; `SESSIONHANDOFF.md` is the current status; `research/FINDINGS.md`
 is the evidence ledger. Read all three before acting.
 
-**Current capital: $1,800.00 USDT** (2026-07-30). Any number in a doc that
-implies a different deposit is stale — flag it. Percentages in the research
+**Current capital: $1,685.99 USDT** (2026-08-17, measured on-exchange:
+main 888.57 + sub `roflbot_pullback` 797.42). Down from $1,800.00 by a
+**100.00 operator withdrawal** (2026-08-16, sub UNIFIED -> main FUND -> off
+book) plus ~$10.12 of realised trading loss over the L1 shakedown's 10 trades.
+Any number in a doc that implies a different deposit is stale — flag it.
+Percentages in the research
 tables are deposit-invariant; only dollar figures move.
 
-⚠ **On-exchange reality (read-only check, 2026-08-03): $1,797.14, and NOT
-where the deploy plan assumes.** Main uid 235719285 holds **$797.65 in the
-FUND wallet and $0.00003 in UNIFIED** (= the trading wallet the 8 `-t` legs
-draw on — they would start with zero margin); sub `roflbot_pullback` uid
-574595575 holds **$999.49 in UNIFIED**. So the split is 797.65 / 999.49, not
-the planned 900 / 900 — a ~25% size asymmetry between the `-t` and `-p` books
-that silently breaks the validated 50/50 blend. Before L1: move main's FUND →
-UNIFIED and rebalance both accounts to $898.57, or re-derive
-`LEG4H_LIVE_EQUITY` per account from the real balances. Main is flat (0
-positions); the sub needs its own key to confirm.
+⚠ **Book weights are BLEND75 since 2026-08-17** (0.75 triple / 0.25 pull, the
+demotion pre-registered 2026-07-06). Capital is split ACROSS TWO ACCOUNTS to
+match: main (`-t`) 1,264.49 and sub (`-p`) 421.50. The keys are trade-only, so
+any rebalance is a MANUAL Bybit-UI step — see deploy/LIVE.md "Changing the
+blend weights". The −8% halt line is anchored to the 1,685.99 reset baseline
+(halt at 1,551.11).
 
 ## The goal
 

@@ -293,10 +293,19 @@ PULL_LEG_EQUITY=<sub / 8>
 
 `init-trading.sh` refuses to call the box ready unless both are set.
 
-**5) The −8% halt line does NOT re-base.** It stays anchored to the ORIGINAL
-deploy baseline of 1,795.20 (halt at −143.62). Re-basing it onto post-drawdown
-capital would quietly forgive the drawdown already taken, which is moving the
-goalposts. Sizing follows current capital; the kill switch follows the deploy.
+**5) The −8% halt line: re-base ONLY for capital moves, never for losses.**
+The distinction is the whole point:
+* **A withdrawal/deposit MUST adjust the baseline** — otherwise the halt line
+  reads your own transfer as a drawdown. Not doing this is an accounting bug.
+* **A LOSS must NOT adjust it.** Re-basing after a bad month quietly forgives
+  the drawdown already taken, which is moving the goalposts.
+
+Anchored 2026-08-17 at the **1,685.99** reset baseline (**halt at 1,551.11**),
+which combines a −100.00 withdrawal (legitimate re-base) with a deliberate,
+operator-approved reset of the −10.12 realised (a goalpost move, taken
+knowingly because both the weights and the capital changed at the same time).
+The trade record survives in FINDINGS and the `events-*.jsonl` audit trail —
+only the halt-line reference moved.
 
 **6) Clear state and restart** — the procedure immediately below. Then verify
 every leg came up on the intended number:

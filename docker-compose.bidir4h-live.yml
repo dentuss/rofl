@@ -101,12 +101,12 @@ x-bot: &bot-defaults
 x-triple: &triple-env
   <<: *env-defaults
   STRATEGY_PRESET: adaptive_bidir_4h
-  STARTING_EQUITY: ${TRIPLE_LEG_EQUITY:-168.30}
+  STARTING_EQUITY: ${TRIPLE_LEG_EQUITY:-158.06}
 
 x-pull: &pull-env
   <<: *env-defaults
   STRATEGY_PRESET: pullback_bidir_4h
-  STARTING_EQUITY: ${PULL_LEG_EQUITY:-56.10}
+  STARTING_EQUITY: ${PULL_LEG_EQUITY:-52.69}
   # SUB-ACCOUNT key — see the two-accounts header block. Empty = the -p legs
   # refuse to trade live (ccxt auth fails loudly), which is the safe default.
   API_KEY: ${PULL_API_KEY:-}
@@ -117,8 +117,12 @@ x-pull: &pull-env
 # per-leg var is gone: the -t legs read TRIPLE_LEG_EQUITY and the -p legs read
 # PULL_LEG_EQUITY, both set on the x-triple / x-pull anchors above.
 #
-#   book 1,795.20  ->  triple 0.75 = 1,346.40 / 8 = 168.30 per -t leg
-#                      pull   0.25 =   448.80 / 8 =  56.10 per -p leg
+#   book 1,686.00  ->  triple 0.75 = 1,264.48 / 8 = 158.06 per -t leg
+#                      pull   0.25 =   421.52 / 8 =  52.69 per -p leg
+#
+# Capital RE-BASED 2026-08-17 after the operator withdrew 100 USDT from the
+# sub (sub UNIFIED -> main FUND -> off-book, 2026-08-16). Measured on-exchange
+# total at reset: main 888.57 + sub 797.42 = 1,685.99.
 #
 # WHY (research/FINDINGS.md 2026-08-13): the PULL leg fails the sleeve law
 # standalone (full Sh 0.35 < 0.5, pre-2023 -2.53 < 0) on 70 real pre-2023

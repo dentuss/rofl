@@ -231,6 +231,58 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-17 — L1 shakedown CLOSED; book reset to BLEND75 on 1,685.99
+
+Operator flattened the book (5 `-t` closes in one 7-second batch, net
+**+0.559**) and called the reset. Full reconcile before touching anything.
+
+**A −109.21 gap against the bot's books turned out NOT to be a loss.** The
+account total read 1,685.99 against the 1,795.20 baseline — −6.08%, three
+quarters of the way to the −8% halt line, versus the −0.59% the bot reported.
+`universalTransferListQuery` found the cause: a **100.00 USDT operator
+withdrawal** on 2026-08-16 (sub UNIFIED → main FUND → off book).
+
+| | |
+|---|---|
+| on-exchange 2026-08-03 | 1,797.14 |
+| operator withdrawal | −100.00 |
+| expected if flat | 1,697.14 |
+| actual at reset | 1,685.99 |
+| **residual** | **−11.15** |
+
+Residual −11.15 vs bot realised −10.12 leaves ~−1, which is the known unbooked
+funding plus `sol-p`'s open position. **The books reconcile.** Recorded because
+the first read looked like a −6% drawdown and was not one: a withdrawal
+measured against an unadjusted baseline is indistinguishable from a loss until
+you check the transfer log. **Check transfers BEFORE calling a drawdown.**
+
+**L1 shakedown record (10 trades, 2026-08-08 → 08-17):** 8 SL, 1 TP, 5 manual
+closes at flatten; realised **−10.12** on ~1,795 (−0.56%). Worth stating
+plainly: 1 TP in 9 engine-driven exits is an 11% TP rate against a backtested
+23.3%, but at n=9 the 95% CI comfortably contains 23.3% — the same arithmetic
+that said 7 stops was not evidence says 1 TP is not evidence either.
+
+**What L1 actually bought** — three defects no backtest could have found:
+1. funding never booked (−1.4bp/round trip, FAVOURABLE to the local number)
+2. TP exit charged taker while booked maker (−0.0397 on the one TP)
+3. the executor/engine drift baseline (2.0% at the deployed geometry)
+
+**Reset parameters, adopted:**
+* BLEND75 — 0.75 triple / 0.25 pull, the demotion pre-registered 2026-07-06.
+* `TRIPLE_LEG_EQUITY` 158.06 × 8 = 1,264.48 (main); `PULL_LEG_EQUITY` 52.69 ×
+  8 = 421.52 (sub); book 1,686.00.
+* Baseline **1,685.99**, halt at **1,551.11**. Operator explicitly chose to
+  reset rather than carry the −10.12 forward. **This IS a goalpost move and is
+  logged as one** — the −100 withdrawal portion is a legitimate re-base, the
+  −10.12 portion is a decision, taken because weights AND capital both changed.
+* Funding fix ships in the same redeploy (venue `closedPnl` booking), which
+  also fixes defect 2 above.
+
+**`sol-p` fired 2026-08-15 — the first `-p` entry in 12 days** (LONG SOL @
+75.47), confirming the pullback leg is wired and not silently dead. Closed by
+the operator at flatten. It is 1 trade: it neither confirms nor challenges the
+BLEND75 decision, which rests on 181 backtested `-p` trades.
+
 ## 2026-08-15 — FIRST TP: the maker-exit assumption did NOT hold (n=1)
 
 `link-t` LONG 8.775 → 9.550, qty 6.5, the book's first take-profit after 7
