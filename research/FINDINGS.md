@@ -231,6 +231,77 @@ not engineered — the pin date was committed to first.
 The assert was NOT loosened for the deployed tier; that would have converted a
 live tripwire into decoration.
 
+## 2026-08-27 — Spreads are TICK-CONSTRAINED; stress thins DEPTH, not spread
+
+`research/stress_cost.py`. The collector caught a real event — liquidations
+~1,000/day → **8,275** on 08-21 while BTC ran 63.8k → 78.3k — so the cost model
+could finally be tested outside the calm window it was calibrated in. Stress
+days were selected MECHANICALLY from liquidation counts (≥3× median daily),
+a series independent of the metric, fixed before any spread was computed.
+
+**PRE-REGISTERED BAR NOT MET — the flat cost model survives.** Median spread
+FELL in every MAJORS8 name during stress (ratios 0.80–0.95); 0/8 doubled, and
+only ADA exceeded the 2bp slip allowance materially (and it does so in BOTH
+regimes). Recorded as a negative.
+
+**But the reason it survives is mechanical, and that is the real finding.**
+Measuring median spread against one tick on 08-21:
+
+| | spread / 1 tick |
+|---|---|
+| 21 of 23 symbols | **1.00** |
+| SAND, GRT, OP, ETC, FIL | 1.01–1.07 |
+| RUNE | 2.04 |
+
+**Every one of these markets is pinned at the minimum possible spread**, even
+on the worst liquidation day we have. A spread already at the floor CANNOT
+widen — so "spreads did not blow out in stress" is not evidence of resilience,
+it is arithmetic. The wide-looking names are wide for TICK reasons, not
+liquidity: ADA 4.66bp is one tick of 0.0001 on a $0.21 asset; ATOM 6.40, NEAR
+5.29, GRT 6.17 likewise. **This is not an illiquidity ranking and must not be
+read as one.**
+
+**Where the stress actually landed: top-of-book NOTIONAL, which collapsed while
+spreads tightened.**
+
+| sym | calm $ | stress $ | ratio |
+|---|---|---|---|
+| XRP | 18,971 | 3,707 | **0.20** |
+| SOL | 52,608 | 17,252 | 0.33 |
+| BTC | 146,135 | 52,034 | 0.36 |
+| LINK | 854 | **323** | 0.38 |
+| DOGE | 5,548 | 2,787 | 0.50 |
+| ADA | 14,713 | 9,048 | 0.61 |
+| ETH | 37,353 | 24,980 | 0.67 |
+| AVAX | 456 | **341** | 0.75 |
+
+Makers quote tighter but far smaller in fast markets. **LINK at $323 and AVAX
+at $341 of touch liquidity are the ones to watch**: at BLEND75 sizing those are
+the same order of magnitude as a leg's own order, so our fill would be a
+material share of the touch precisely when we most want out.
+
+**CONSEQUENCES, separated by what is earned and what is not:**
+1. **Earned (registered):** the flat cost model is not invalidated by a
+   volume-expanding rally. The 4h/6-ATR defence stands for THIS event class.
+2. **Earned (mechanism):** spread cost is a TICK property, and the flat 2bp
+   slip allowance is miscalibrated per symbol in BOTH directions — BTC 0.01bp
+   and ETH 0.04bp are wildly over-modelled, ADA at 4.66bp is under-modelled.
+   A tick-aware slip floor is the honest model.
+3. **NOT earned — needs its own pre-registration:** the depth collapse. It was
+   a reported proxy in this script, NOT a gated metric, so promoting it to a
+   result here would be the post-hoc mining law 2 forbids. It motivates a new
+   experiment; it does not conclude one.
+
+**The uncomfortable connection:** the adverse variable is DEPTH, and `depth_1s`
+— the series built to measure exactly that — is degenerate for its whole v1 era
+(same-day FINDINGS entry). We built the right instrument and it was broken. The
+fix ships today; a depth-under-stress study is owed once v2 has accumulated a
+comparable event.
+
+**SCOPE LIMIT, stated plainly:** this event was a high-volume RALLY that
+squeezed shorts. It is NOT a liquidity crisis — no exchange outage, no
+one-sided flash crash. Nothing here licenses a claim that costs hold in those.
+
 ## 2026-08-17 — L1 shakedown CLOSED; book reset to BLEND75 on 1,685.99
 
 Operator flattened the book (5 `-t` closes in one 7-second batch, net
