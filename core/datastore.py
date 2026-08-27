@@ -43,10 +43,24 @@ TICK_KINDS: dict[str, list[str]] = {
     "ticker_1m": ["ts", "sym", "last", "mark", "index", "funding", "oi"],
     # depth_1s: cumulative notional within N bps of mid, per side. MAJORS8
     # only — depth is an execution question and we execute only there.
+    # v2 (2026-08-27): narrower bands + the book's own reach. See DEPTH_1S_V1.
     "depth_1s":  ["ts", "sym", "mid",
-                  "bid_1bp", "bid_5bp", "bid_10bp", "bid_25bp",
-                  "ask_1bp", "ask_5bp", "ask_10bp", "ask_25bp"],
+                  "bid_1bp", "bid_2bp", "bid_5bp", "bid_10bp",
+                  "ask_1bp", "ask_2bp", "ask_5bp", "ask_10bp",
+                  "bid_span_bp", "ask_span_bp"],
 }
+
+# depth_1s v1 (2026-08-07 .. 2026-08-27). Retained so the historical files
+# still load — but read the FINDINGS entry before using them: at limit=50 the
+# received book never reached the 1bp band, so all four buckets carried the
+# identical top-50 total on 100% of BTC/ETH rows. The v1 data is a usable
+# single liquidity series and is NOT a usable band gradient. Loading v1
+# leaves bid_span_bp/ask_span_bp NaN, which is the intended tell: no span,
+# no gradient.
+DEPTH_1S_V1 = ["ts", "sym", "mid",
+               "bid_1bp", "bid_5bp", "bid_10bp", "bid_25bp",
+               "ask_1bp", "ask_5bp", "ask_10bp", "ask_25bp"]
+ALT_SCHEMAS = {"depth_1s": (DEPTH_1S_V1,)}
 
 # Ops metadata, not tick data: no `sym` column, so it is deliberately outside
 # TICK_KINDS (load_ticks groups and filters on sym).
@@ -67,8 +81,18 @@ def tick_days() -> list[str]:
                   if p.is_dir() and len(p.name) == 10 and p.name[4] == "-")
 
 
-def _read_csv(path: Path, cols: list[str]) -> pd.DataFrame:
-    """Read a (possibly gzipped, possibly truncated) collector CSV."""
+def _read_csv(path: Path, cols: list[str],
+              alts: tuple = ()) -> pd.DataFrame:
+    """Read a (possibly gzipped, possibly truncated) collector CSV.
+
+    `alts` are older schemas for the same kind. The width filter below drops
+    any line that does not match the expected column count, so a schema change
+    would otherwise make every historical file load as EMPTY rather than
+    error — silent, and the worst possible failure for an evidence ledger.
+    Files are matched to a schema by their own header width, then reindexed
+    onto `cols`, so callers always see one shape and columns a file predates
+    come back NaN.
+    """
     try:
         if path.suffix == ".gz":
             with gzip.open(path, "rt", encoding="utf-8", errors="replace") as fh:
@@ -82,7 +106,14 @@ def _read_csv(path: Path, cols: list[str]) -> pd.DataFrame:
         # quoted fields (plain numerics + a base-symbol string), so counting
         # separators is a sound check.
         lines = text.splitlines()
-        good = [ln for ln in lines if ln.count(",") == len(cols) - 1]
+        schema = cols
+        if lines:
+            width = lines[0].count(",") + 1
+            for cand in (cols, *alts):
+                if len(cand) == width:
+                    schema = cand
+                    break
+        good = [ln for ln in lines if ln.count(",") == len(schema) - 1]
         if not good:
             return pd.DataFrame(columns=cols)
         df = pd.read_csv(io.StringIO("\n".join(good)), on_bad_lines="skip")
@@ -91,8 +122,13 @@ def _read_csv(path: Path, cols: list[str]) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=cols)
     # A file written before a header fix, or a header-less append, still loads.
-    if list(df.columns) != cols and len(df.columns) == len(cols):
-        df.columns = cols
+    if list(df.columns) != schema and len(df.columns) == len(schema):
+        df.columns = schema
+    if schema is not cols:
+        # Older schema: surface it on the current shape, NaN for what it lacks.
+        for c in cols:
+            if c not in df.columns:
+                df[c] = float("nan")
     return df
 
 
@@ -109,6 +145,7 @@ def load_ticks(kind: str = "trades_1s", start: str | None = None,
     if kind not in TICK_KINDS:
         raise ValueError(f"unknown kind {kind!r}; expected one of {list(TICK_KINDS)}")
     cols = TICK_KINDS[kind]
+    alts = ALT_SCHEMAS.get(kind, ())
     frames = []
     for day in tick_days():
         if start and day < start:
@@ -126,7 +163,7 @@ def load_ticks(kind: str = "trades_1s", start: str | None = None,
         gz, plain = d / f"{kind}.csv.gz", d / f"{kind}.csv"
         p = gz if gz.exists() else plain
         if p.exists():
-            df = _read_csv(p, cols)
+            df = _read_csv(p, cols, alts)
             if not df.empty:
                 df["day"] = day
                 frames.append(df)

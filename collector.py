@@ -70,7 +70,17 @@ DEPTH_SYMBOLS = [x.strip() for x in
 # Cumulative notional available within N bps of mid, per side. Chosen to
 # bracket real order sizes: at $1,800 a leg trades $50-80, and 2026-08-07
 # measurement found LINK/AVAX top-of-book below that ~9% of the time.
-DEPTH_BPS = (1, 5, 10, 25)
+# Bands must be REACHABLE by the book we actually receive, or every bucket
+# collapses to the same number. Measured 2026-08-27: with limit=50, BTC's
+# 50-level book spans ~5 USD against a 1bp band of ~7.8 USD, so ALL FOUR
+# buckets returned the identical top-50 total on 100% of BTC and ETH rows.
+# 500 levels (Bybit linear's deepest stream) plus narrower bands makes the
+# gradient real. The widest band is still not always reachable on BTC — which
+# is why span_bp below is recorded rather than assumed.
+# Bybit linear serves 1/50/200/500-level books; 500 is the deepest and the
+# only one that reaches past a couple of bps on BTC. Overridable for testing.
+DEPTH_LEVELS = int(os.getenv("DEPTH_LEVELS", "500"))
+DEPTH_BPS = (1, 2, 5, 10)
 # Stop writing before the disk is full: a full disk raises OSError inside
 # Sink.write, which the collect_* handlers swallow as "retrying in 5s" — the
 # collector would spin forever, logging warnings, silently recording nothing.
@@ -195,6 +205,12 @@ async def collect_book(ex, sym: str, sink: Sink):
 async def collect_depth(ex, sym: str, sink: Sink):
     """Cumulative notional within N bps of mid, per side, at most 1/second.
 
+    ⚠ The bands are only meaningful while the received book REACHES them. See
+    span_bp below and the 2026-08-27 FINDINGS entry: at limit=50 every band
+    collapsed to the top-50 total on 100% of BTC/ETH rows, and on ADA the 1bp
+    band sat inside one tick and was structurally zero. Read span_bp before
+    reading a gradient.
+
     Stores the ANSWER (how much size sits within a price band) rather than raw
     ladders: a 50-level ladder for 8 symbols at 1/s is ~100 GB/yr, the buckets
     are ~4 GB/yr, and the buckets are what an execution-cost study actually
@@ -206,7 +222,7 @@ async def collect_depth(ex, sym: str, sink: Sink):
     last = 0
     while True:
         try:
-            ob = await ex.watch_order_book(sym, limit=50)
+            ob = await ex.watch_order_book(sym, limit=DEPTH_LEVELS)
             now = int(time.time())
             bids, asks = ob.get("bids") or [], ob.get("asks") or []
             if now == last or not bids or not asks:
@@ -223,7 +239,17 @@ async def collect_depth(ex, sym: str, sink: Sink):
                     tot = sum(px * qty for px, qty in side
                               if (px >= lim if sign < 0 else px <= lim))
                     out.append(f"{tot:.2f}")
-            sink.write(f"{now},{base},{mid:.8f}," + ",".join(out))
+            # How far the received book actually REACHES, in bps from mid. A
+            # band wider than this is not a market fact, it is truncation:
+            # every bucket at or beyond span_bp is the same number, and any
+            # study reading a gradient there is reading an artifact. Recording
+            # it makes that self-evident instead of silent (the 2026-08-27
+            # bug shipped 20 days of degenerate buckets precisely because
+            # nothing in the row said how deep the book went).
+            span_b = (mid - bids[-1][0]) / mid * 1e4
+            span_a = (asks[-1][0] - mid) / mid * 1e4
+            sink.write(f"{now},{base},{mid:.8f}," + ",".join(out)
+                       + f",{span_b:.2f},{span_a:.2f}")
         except Exception as e:
             log.warning(f"depth {sym}: {e}; retrying in 5s")
             await asyncio.sleep(5)
@@ -340,7 +366,8 @@ async def main():
         "book": Sink("book_1s", "ts,sym,bid,bid_sz,ask,ask_sz"),
         "ticker": Sink("ticker_1m", "ts,sym,last,mark,index,funding,oi"),
         "depth": Sink("depth_1s", "ts,sym,mid," + ",".join(
-            [f"bid_{b}bp" for b in DEPTH_BPS] + [f"ask_{b}bp" for b in DEPTH_BPS])),
+            [f"bid_{b}bp" for b in DEPTH_BPS] + [f"ask_{b}bp" for b in DEPTH_BPS])
+            + ",bid_span_bp,ask_span_bp"),
         "session": Sink("session_1m", "ts,n_symbols,n_depth_symbols,free_mb"),
     }
     log.info(f"collector up: {len(SYMBOLS)} symbols "
